@@ -82,8 +82,37 @@ which codes contract-first against the stubbed structured output.
 
 ## Traceability
 
-Requirement → phase mapping is filled in by the roadmap (`.planning/ROADMAP.md`).
+Requirement → phase mapping. Phases defined in `.planning/ROADMAP.md`.
 
-| REQ-ID | Phase |
-|--------|-------|
-| _(populated during roadmap creation)_ | |
+| REQ-ID | Phase | Status |
+|--------|-------|--------|
+| MODEL-01 | Phase 1 | Pending |
+| MODEL-02 | Phase 1 | Pending |
+| MODEL-03 | Phase 1 | Pending |
+| MODEL-04 | Phase 1 | Pending |
+| MODEL-05 | Phase 1 | Pending |
+| GRID-01 | Phase 1 | Pending |
+| GRID-04 | Phase 1 | Pending |
+| AVAIL-01 | Phase 1 | Pending |
+| STORE-01 | Phase 1 | Pending |
+| STORE-02 | Phase 1 | Pending |
+| HOLD-01 | Phase 1 | Pending |
+| HOLD-03 | Phase 1 | Pending |
+| HOLD-04 | Phase 1 | Pending |
+| AVAIL-02 | Phase 2 | Pending |
+| AVAIL-03 | Phase 2 | Pending |
+| AVAIL-04 | Phase 2 | Pending |
+| GRID-02 | Phase 2 | Pending |
+| GRID-03 | Phase 2 | Pending |
+| HOLD-05 | Phase 2 | Pending |
+| HOLD-08 | Phase 2 | Pending |
+| HOLD-06 | Phase 3 | Pending |
+| HOLD-07 | Phase 3 | Pending |
+| STORE-03 | Phase 4 | Pending |
+| STORE-04 | Phase 4 | Pending |
+| STORE-05 | Phase 4 | Pending |
+| HOLD-02 | Phase 4 | Pending |
+| PKG-01 | Phase 5 | Pending |
+| PKG-02 | Phase 5 | Pending |
+| PKG-03 | Phase 5 | Pending |
+</content>
