@@ -33,3 +33,11 @@ class HoldNotFoundError(Exception):
     def __init__(self, hold_id: str) -> None:
         self.hold_id = hold_id
         super().__init__(f"hold {hold_id!r} not found")
+
+
+class ResourceNotFoundError(Exception):
+    """Raised when a resource_id does not refer to a defined Resource."""
+
+    def __init__(self, resource_id: str) -> None:
+        self.resource_id = resource_id
+        super().__init__(f"resource {resource_id!r} not found")

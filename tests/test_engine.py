@@ -4,7 +4,11 @@ import pytest
 
 from availability_engine.contracts import Resource, SlotStatus
 from availability_engine.engine import AvailabilityEngine
-from availability_engine.errors import CapacityExhaustedError, HoldNotFoundError
+from availability_engine.errors import (
+    CapacityExhaustedError,
+    HoldNotFoundError,
+    ResourceNotFoundError,
+)
 from availability_engine.storage.memory import InMemoryStore
 
 # 2026-09-07 is a Monday. The window below (UTC) fully covers that Monday's
@@ -129,6 +133,21 @@ async def test_confirm_hold_payload_roundtrip(sample_resource: Resource) -> None
         await engine.confirm_hold(second_hold.id, payload=sentinel_payload)
 
     assert "sentinel-value-42" not in str(exc_info.value)
+
+
+async def test_unknown_resource_raises_consistently() -> None:
+    # WR-02: get_availability and place_hold must fail the same way for an
+    # unknown resource_id — a dedicated, catchable error, not a bare
+    # ValueError on one path and a silent no-op on the other.
+    engine = AvailabilityEngine(InMemoryStore())
+
+    with pytest.raises(ResourceNotFoundError):
+        await engine.get_availability("does-not-exist", WINDOW_START, WINDOW_END)
+
+    with pytest.raises(ResourceNotFoundError):
+        await engine.place_hold(
+            "does-not-exist", WINDOW_START, WINDOW_END, ttl_seconds=60
+        )
 
 
 async def test_release_hold_frees_capacity(sample_resource: Resource) -> None:

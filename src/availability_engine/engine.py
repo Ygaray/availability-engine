@@ -20,6 +20,7 @@ from availability_engine.contracts import (
 from availability_engine.core.availability import free_fragments
 from availability_engine.core.grid import grid_slots
 from availability_engine.core.intervals import Interval
+from availability_engine.errors import ResourceNotFoundError
 from availability_engine.storage.protocol import StorageBackend
 
 
@@ -35,7 +36,10 @@ class AvailabilityEngine:
     ) -> AvailabilityResult:
         resource = await self._storage.get_resource(resource_id)
         if resource is None:
-            return AvailabilityResult(resource_id=resource_id, slots=[])
+            # WR-02: match place_hold's unknown-resource handling — both
+            # raise the same dedicated error rather than one silently
+            # no-oping and the other raising.
+            raise ResourceNotFoundError(resource_id)
 
         hours = time_boundary.localize_operating_hours(resource, start, end)
         window = Interval(start=start, end=end)
@@ -76,7 +80,7 @@ class AvailabilityEngine:
     ) -> Hold:
         resource = await self._storage.get_resource(resource_id)
         if resource is None:
-            raise ValueError(f"resource {resource_id!r} not found")
+            raise ResourceNotFoundError(resource_id)
         if slot_end <= slot_start:
             # WR-01: reject inverted/zero-length slots at the boundary,
             # before they're stored as a corrupt-duration Hold/Booking.

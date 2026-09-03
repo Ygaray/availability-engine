@@ -15,6 +15,7 @@ from availability_engine.errors import (
     CapacityExhaustedError,
     HoldExpiredError,
     HoldNotFoundError,
+    ResourceNotFoundError,
 )
 from availability_engine.storage.protocol import StorageBackend
 
@@ -29,6 +30,7 @@ __all__ = [
     "LocalInterval",
     "PublicSlot",
     "Resource",
+    "ResourceNotFoundError",
     "SlotStatus",
     "StorageBackend",
     "Weekday",
