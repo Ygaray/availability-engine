@@ -63,9 +63,20 @@ class Resource(BaseModel):
     id: str
     capacity: Annotated[int, Field(ge=1)]  # MODEL-01
     operating_hours: dict[Weekday, list[LocalInterval]]  # MODEL-02, D-03
-    buffer: timedelta = Field(default=timedelta(0))  # MODEL-03
+    # ge=timedelta(0): a negative buffer could make grid_slots' step
+    # (slot_duration + buffer) non-positive, hanging the grid-generation loop
+    # (CR-02).
+    buffer: Annotated[timedelta, Field(ge=timedelta(0))] = Field(
+        default=timedelta(0)
+    )  # MODEL-03
     timezone: str  # MODEL-04
-    slot_duration: timedelta  # GRID-01 — required, no default (see plan design note)
+    # gt=timedelta(0): grid_slots' loop only terminates because cursor
+    # strictly advances past fragment.end each iteration; slot_duration <= 0
+    # (combined with a non-negative buffer) would make the step size
+    # non-positive and hang the loop forever (CR-02).
+    slot_duration: Annotated[
+        timedelta, Field(gt=timedelta(0))
+    ]  # GRID-01 — required, no default (see plan design note)
 
     @field_validator("timezone")
     @classmethod

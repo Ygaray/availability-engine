@@ -58,6 +58,28 @@ def test_resource_timezone_validation() -> None:
         Resource(**kwargs)
 
 
+def test_resource_slot_duration_must_be_positive() -> None:
+    # CR-02: slot_duration <= 0 makes grid_slots' step size non-positive,
+    # hanging the grid-generation loop forever.
+    kwargs = _base_resource_kwargs()
+    kwargs["slot_duration"] = timedelta(0)
+    with pytest.raises(pydantic.ValidationError):
+        Resource(**kwargs)
+
+    kwargs["slot_duration"] = timedelta(minutes=-30)
+    with pytest.raises(pydantic.ValidationError):
+        Resource(**kwargs)
+
+
+def test_resource_buffer_cannot_be_negative() -> None:
+    # CR-02: a buffer negative enough to cancel out slot_duration makes
+    # grid_slots' step size non-positive, hanging the grid-generation loop.
+    kwargs = _base_resource_kwargs()
+    kwargs["buffer"] = timedelta(minutes=-60)
+    with pytest.raises(pydantic.ValidationError):
+        Resource(**kwargs)
+
+
 def _base_hold_kwargs() -> dict:
     """Minimal valid Hold kwargs, overridden per-test for the field under test."""
     now_utc = datetime(2026, 9, 3, 9, 0, tzinfo=UTC)
