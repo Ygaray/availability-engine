@@ -12,32 +12,32 @@ which codes contract-first against the stubbed structured output.
 
 ### Domain Model (`MODEL`)
 
-- [ ] **MODEL-01**: Consumer can define a Resource with a capacity of ≥ 1 concurrent bookings
-- [ ] **MODEL-02**: Consumer can set a Resource's per-day operating hours (per weekday), expressed in the resource's local wall-clock time
-- [ ] **MODEL-03**: Consumer can set a Resource's buffer/reset time enforced between consecutive sessions
-- [ ] **MODEL-04**: Consumer can assign a Resource an IANA timezone (e.g. `America/Chicago`) that governs its operating hours and DST
-- [ ] **MODEL-05**: All domain value objects (Resource, Slot, Hold, Booking, availability outputs) are immutable and use half-open `[start, end)` time intervals throughout
+- [x] **MODEL-01**: Consumer can define a Resource with a capacity of ≥ 1 concurrent bookings
+- [x] **MODEL-02**: Consumer can set a Resource's per-day operating hours (per weekday), expressed in the resource's local wall-clock time
+- [x] **MODEL-03**: Consumer can set a Resource's buffer/reset time enforced between consecutive sessions
+- [x] **MODEL-04**: Consumer can assign a Resource an IANA timezone (e.g. `America/Chicago`) that governs its operating hours and DST
+- [x] **MODEL-05**: All domain value objects (Resource, Slot, Hold, Booking, availability outputs) are immutable and use half-open `[start, end)` time intervals throughout
 
 ### Time & Slot Grid (`GRID`)
 
-- [ ] **GRID-01**: Engine generates a fixed-duration slot grid for a Resource from its operating hours + slot length + buffer
+- [x] **GRID-01**: Engine generates a fixed-duration slot grid for a Resource from its operating hours + slot length + buffer
 - [ ] **GRID-02**: Grid generation is correct across DST transitions — spring-forward gaps and fall-back ambiguity produce no missing, duplicated, or hour-shifted slots (fixture-tested on real transition dates)
 - [ ] **GRID-03**: Engine handles operating hours that cross midnight without truncating or double-counting slots
-- [ ] **GRID-04**: All engine inputs/outputs at the public boundary are UTC-aware datetimes; the engine rejects naive datetimes; timezone conversion happens only at the facade edge
+- [x] **GRID-04**: All engine inputs/outputs at the public boundary are UTC-aware datetimes; the engine rejects naive datetimes; timezone conversion happens only at the facade edge
 
 ### Availability Query (`AVAIL`)
 
-- [ ] **AVAIL-01**: Consumer can query a Resource's availability over a date range and receive structured `available` / `booked` windows
+- [x] **AVAIL-01**: Consumer can query a Resource's availability over a date range and receive structured `available` / `booked` windows
 - [ ] **AVAIL-02**: Availability is capacity-aware — a slot reports remaining capacity as a count (never collapsed to a boolean), computed via sweep-line event counting so capacity ≥ 1 is correct
 - [ ] **AVAIL-03**: Availability reads exclude expired holds (lazy expiry: active = `expires_at > now`), via the one shared active-entries primitive used by every read and write path
 - [ ] **AVAIL-04**: The structured output contract is stable and documented, so the parallel consumer's stub matches the real output (conformance-testable)
 
 ### Holds & Bookings (`HOLD`)
 
-- [ ] **HOLD-01**: Consumer can place a short-lived, atomic hold on a slot with a TTL; the hold is rejected if the slot's capacity is already exhausted
+- [x] **HOLD-01**: Consumer can place a short-lived, atomic hold on a slot with a TTL; the hold is rejected if the slot's capacity is already exhausted
 - [ ] **HOLD-02**: Concurrent hold placement never exceeds capacity — under N concurrent bookers on a capacity-K slot, at most K holds succeed (proven against real Postgres, not only in-memory)
-- [ ] **HOLD-03**: Consumer can confirm an active, unexpired hold into a Booking, attaching an opaque consumer payload that round-trips untouched
-- [ ] **HOLD-04**: Consumer can explicitly release a hold, freeing its capacity immediately
+- [x] **HOLD-03**: Consumer can confirm an active, unexpired hold into a Booking, attaching an opaque consumer payload that round-trips untouched
+- [x] **HOLD-04**: Consumer can explicitly release a hold, freeing its capacity immediately
 - [ ] **HOLD-05**: Expired holds auto-release lazily — they stop counting against capacity on the next read or hold attempt, with no background sweeper
 - [ ] **HOLD-06**: Consumer can cancel a confirmed Booking, freeing its capacity
 - [ ] **HOLD-07**: `place_hold` and `confirm` accept an optional idempotency key; a retry with the same key returns the original result instead of acting twice (enforced by a unique constraint / conditional write)
@@ -45,8 +45,8 @@ which codes contract-first against the stubbed structured output.
 
 ### Storage (`STORE`)
 
-- [ ] **STORE-01**: Engine defines a coarse-grained async storage protocol whose methods are each exactly one atomic operation; the engine is written against the protocol, never a concrete backend
-- [ ] **STORE-02**: An in-memory storage implementation ships as the reference/test backend
+- [x] **STORE-01**: Engine defines a coarse-grained async storage protocol whose methods are each exactly one atomic operation; the engine is written against the protocol, never a concrete backend
+- [x] **STORE-02**: An in-memory storage implementation ships as the reference/test backend
 - [ ] **STORE-03**: One SQL storage implementation targets both SQLite (dev) and Postgres (prod), using the portable atomic conditional-write pattern (`BEGIN IMMEDIATE` on SQLite, `FOR UPDATE` / row locks on Postgres)
 - [ ] **STORE-04**: The same parametrized contract test suite passes unmodified against in-memory, SQLite, and Postgres backends
 - [ ] **STORE-05**: The SQL schema is versioned with migrations from the first commit (initial migration = current schema)
@@ -86,19 +86,19 @@ Requirement → phase mapping. Phases defined in `.planning/ROADMAP.md`.
 
 | REQ-ID | Phase | Status |
 |--------|-------|--------|
-| MODEL-01 | Phase 1 | Pending |
-| MODEL-02 | Phase 1 | Pending |
-| MODEL-03 | Phase 1 | Pending |
-| MODEL-04 | Phase 1 | Pending |
-| MODEL-05 | Phase 1 | Pending |
-| GRID-01 | Phase 1 | Pending |
-| GRID-04 | Phase 1 | Pending |
-| AVAIL-01 | Phase 1 | Pending |
-| STORE-01 | Phase 1 | Pending |
-| STORE-02 | Phase 1 | Pending |
-| HOLD-01 | Phase 1 | Pending |
-| HOLD-03 | Phase 1 | Pending |
-| HOLD-04 | Phase 1 | Pending |
+| MODEL-01 | Phase 1 | Complete |
+| MODEL-02 | Phase 1 | Complete |
+| MODEL-03 | Phase 1 | Complete |
+| MODEL-04 | Phase 1 | Complete |
+| MODEL-05 | Phase 1 | Complete |
+| GRID-01 | Phase 1 | Complete |
+| GRID-04 | Phase 1 | Complete |
+| AVAIL-01 | Phase 1 | Complete |
+| STORE-01 | Phase 1 | Complete |
+| STORE-02 | Phase 1 | Complete |
+| HOLD-01 | Phase 1 | Complete |
+| HOLD-03 | Phase 1 | Complete |
+| HOLD-04 | Phase 1 | Complete |
 | AVAIL-02 | Phase 2 | Pending |
 | AVAIL-03 | Phase 2 | Pending |
 | AVAIL-04 | Phase 2 | Pending |
