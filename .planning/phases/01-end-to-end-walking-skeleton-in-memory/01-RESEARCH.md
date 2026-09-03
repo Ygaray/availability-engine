@@ -457,17 +457,19 @@ class AvailabilityResult(BaseModel):
 
 **If this table is empty:** N/A — see entries above; none of these bear on the frozen one-way contract shapes (D-01/D-03/D-04 fields themselves), only on secondary implementation choices the planner should confirm.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Does `Resource.buffer` need to be functionally applied in Phase 1's grid generation, or only present as a schema field?**
+1. **RESOLVED — Does `Resource.buffer` need to be functionally applied in Phase 1's grid generation, or only present as a schema field?**
    - What we know: MODEL-03 requirement text is "Consumer can set a Resource's buffer/reset time enforced between consecutive sessions" — the word "enforced" suggests behavior, not just a settable field.
    - What's unclear: Phase 1's success criteria (ROADMAP.md) mention "generates a fixed-duration slot grid derived from the resource's operating hours + slot length + buffer" — this reads as buffer IS applied in Phase 1's grid generation, contradicting Assumption A2 above.
    - Recommendation: **Treat buffer as functionally applied in Phase 1's grid generation** (per ROADMAP.md success criterion #2, which explicitly lists "+ buffer" in the grid derivation) — this overrides Assumption A2; the planner should include a buffer-application task, using the "effective occupied interval" pattern from PITFALLS.md Pitfall 10 (buffer owned by the preceding booking's trailing edge) even in this simplified Phase 1 form.
+   - **Resolution:** Applied as recommended — plan 01-01's `core/grid.py` task functionally applies the buffer in grid generation, and 01-02's `test_buffer_applied` verifies it.
 
-2. **What is Phase 1's exact `Interval`/`Slot` field naming — is there a project convention already?**
+2. **RESOLVED — What is Phase 1's exact `Interval`/`Slot` field naming — is there a project convention already?**
    - What we know: No source code exists yet (confirmed in CONTEXT.md `<code_context>`); `ARCHITECTURE.md` suggests `Interval(start, end)` and `Slot` as separate types, but exact field names are explicitly Claude's Discretion per CONTEXT.md.
    - What's unclear: Nothing blocking — this is intentionally open per the CONTEXT.md discretion note.
    - Recommendation: Use `start`/`end` (not `begin`/`finish` or similar) for consistency with the half-open-interval literature cited throughout project research, and keep the internal `core.intervals.Interval` and the public `contracts.PublicSlot` as distinct types from the start (per ARCHITECTURE.md's Anti-Pattern 3 — never let one leak into the other's role).
+   - **Resolution:** Applied as recommended — plans use `start`/`end` field names throughout, with `core.intervals.Interval` and the public contract type kept distinct.
 
 ## Environment Availability
 
