@@ -29,6 +29,8 @@ fails, no two bookers can ever double-book the same capacity.
 - [ ] Place an atomic hold on a slot (short-lived, TTL); reject if capacity is exhausted
 - [ ] Confirm a hold into a booking, carrying an opaque consumer payload
 - [ ] Release a hold explicitly, and auto-release expired holds lazily on the next read/attempt
+- [ ] Cancel a confirmed booking
+- [ ] Accept an idempotency key on hold/confirm so a retried call returns the original result instead of acting twice (enforced via a unique constraint)
 - [ ] Define a pluggable async storage protocol; ship an in-memory implementation for tests
 - [ ] Ship one SQL storage implementation targeting SQLite (local/dev) and Postgres (prod) with row-lock atomicity
 - [ ] Handle timezones TZ-aware, UTC-internal, with a per-resource IANA zone for operating hours + DST
@@ -71,6 +73,9 @@ fails, no two bookers can ever double-book the same capacity.
 | One SQL impl spanning SQLite + Postgres, row-lock atomicity | Zero-infra local dev (SQLite) + prod (Postgres) from one codebase; matches a typical chatbot deploy | — Pending |
 | Lazy-on-read hold expiry (no background sweeper) | Deterministic and easy to test; a library shouldn't own a runtime lifecycle | — Pending |
 | Contract-first build against a stubbed structured output | Lets the consumer chatbot progress in parallel; forces an early, stable contract | — Pending |
+| Idempotency keys on hold/confirm in v1 | First consumer is network-facing (retries on timeout); without keys a retry double-spends capacity. Cheap now, contract-breaking to retrofit | — Pending |
+| Portable atomicity: single INSERT…SELECT + capacity WHERE + rowcount; BEGIN IMMEDIATE (SQLite) / FOR UPDATE (Postgres) | The only pattern truly identical across both backends; SQLite has no row-level locking. Statement atomicity is the lock | — Pending |
+| Sweep-line event counting for capacity-aware availability | Binary interval subtraction only works for capacity 1; sweep-line handles capacity ≥ 1 from day one without a v2 rewrite | — Pending |
 
 ## Evolution
 
