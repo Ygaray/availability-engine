@@ -6,6 +6,7 @@ based capacity-K edge-case testing is deferred to Phase 2's AVAIL-02.
 """
 
 from datetime import datetime
+from itertools import pairwise
 
 from availability_engine.core.intervals import Interval
 
@@ -31,7 +32,8 @@ def free_fragments(
     for b in busy:
         events.append((b.start, 1))
         events.append((b.end, -1))
-    events.sort(key=lambda e: (e[0], -e[1]))  # process +1 (start) before -1 (end) at same instant
+    # Process +1 (start) before -1 (end) at the same instant.
+    events.sort(key=lambda e: (e[0], -e[1]))
 
     for hour_interval in hours:
         # Collect boundary points within this hours interval: the interval's
@@ -43,7 +45,7 @@ def free_fragments(
                 boundary_times.add(event_time)
         sorted_times = sorted(boundary_times)
 
-        for seg_start, seg_end in zip(sorted_times, sorted_times[1:]):
+        for seg_start, seg_end in pairwise(sorted_times):
             if seg_start >= seg_end:
                 continue
             midpoint = seg_start  # active_count is constant across [seg_start, seg_end)
@@ -51,6 +53,7 @@ def free_fragments(
             for b in busy:
                 if b.start <= midpoint < b.end:
                     active_count += 1
-            results.append((Interval(start=seg_start, end=seg_end), capacity - active_count))
+            segment = Interval(start=seg_start, end=seg_end)
+            results.append((segment, capacity - active_count))
 
     return results

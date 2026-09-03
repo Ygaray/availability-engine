@@ -8,7 +8,7 @@ Phase 1 scope: same-day local-to-UTC combination only. Midnight-crossing
 Phase 2 (GRID-02/GRID-03) — do not handle them here.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from availability_engine.contracts import Resource, Weekday
@@ -48,11 +48,13 @@ def localize_operating_hours(
     while current_date <= end_date:
         weekday = Weekday(current_date.weekday())
         for local_interval in resource.operating_hours.get(weekday, []):
-            local_start = datetime.combine(current_date, local_interval.start, tzinfo=tz)
+            local_start = datetime.combine(
+                current_date, local_interval.start, tzinfo=tz
+            )
             local_end = datetime.combine(current_date, local_interval.end, tzinfo=tz)
             utc_interval = Interval(
-                start=local_start.astimezone(timezone.utc),
-                end=local_end.astimezone(timezone.utc),
+                start=local_start.astimezone(UTC),
+                end=local_end.astimezone(UTC),
             )
             clipped = intersect(utc_interval, query_window)
             if clipped is not None:

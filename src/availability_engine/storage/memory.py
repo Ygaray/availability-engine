@@ -9,11 +9,16 @@ TOCTOU window (Pitfall 1) even though asyncio is single-threaded.
 import asyncio
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from availability_engine.contracts import Booking, Hold, Resource
 from availability_engine.core.intervals import Interval, overlaps
-from availability_engine.errors import CapacityExhaustedError, HoldExpiredError, HoldNotFoundError
+from availability_engine.errors import (
+    CapacityExhaustedError,
+    HoldExpiredError,
+    HoldNotFoundError,
+)
 
 
 @dataclass
@@ -69,7 +74,7 @@ class InMemoryStore:
         slot: Interval,
         capacity: int,
         ttl_seconds: int,
-        payload: dict | None = None,
+        payload: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Hold:
         async with self._lock:
@@ -81,7 +86,7 @@ class InMemoryStore:
                 resource_id=resource_id,
                 slot_start=slot.start,
                 slot_end=slot.end,
-                expires_at=datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds),
+                expires_at=datetime.now(UTC) + timedelta(seconds=ttl_seconds),
             )
             self._holds[hold.id] = hold
             return hold
@@ -89,14 +94,14 @@ class InMemoryStore:
     async def confirm_hold(
         self,
         hold_id: str,
-        payload: dict | None = None,
+        payload: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Booking:
         async with self._lock:
             hold = self._holds.get(hold_id)
             if hold is None:
                 raise HoldNotFoundError(hold_id)
-            if datetime.now(timezone.utc) >= hold.expires_at:
+            if datetime.now(UTC) >= hold.expires_at:
                 raise HoldExpiredError(hold_id)
             del self._holds[hold_id]
             booking = Booking(

@@ -5,18 +5,25 @@ Every datetime crossing this boundary is Pydantic-validated as UTC-aware
 (stdlib dataclass) instead — see `core/intervals.py`.
 """
 
-from datetime import datetime, time, timedelta, timezone
-from enum import Enum, IntEnum
-from typing import Annotated
-
 import zoneinfo
-from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from datetime import UTC, datetime, time, timedelta
+from enum import IntEnum, StrEnum
+from typing import Annotated, Any
+
+from pydantic import (
+    AfterValidator,
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+)
 
 
 def _require_utc(value: datetime) -> datetime:
     # AwareDatetime already guarantees tzinfo is set (raises "timezone_aware"
     # ValidationError otherwise) — this validator narrows further to UTC only.
-    if value.utcoffset() != timezone.utc.utcoffset(None):
+    if value.utcoffset() != UTC.utcoffset(None):
         raise ValueError("datetime must be UTC (offset 00:00)")
     return value
 
@@ -70,7 +77,7 @@ class Resource(BaseModel):
         return v
 
 
-class SlotStatus(str, Enum):
+class SlotStatus(StrEnum):
     AVAILABLE = "available"
     BOOKED = "booked"
     # NOTE: Phase 2 (AVAIL-02) needs the two-list available/booked split with an
@@ -109,4 +116,4 @@ class Booking(BaseModel):
     resource_id: str
     slot_start: UtcDatetime
     slot_end: UtcDatetime
-    payload: dict
+    payload: dict[str, Any]

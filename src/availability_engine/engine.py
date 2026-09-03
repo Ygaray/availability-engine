@@ -5,6 +5,8 @@ StorageBackend Protocol (STORE-01 structural rule). It calls only Protocol
 methods, never a concrete backend.
 """
 
+from typing import Any
+
 from availability_engine import time as time_boundary
 from availability_engine.contracts import (
     AvailabilityResult,
@@ -39,7 +41,8 @@ class AvailabilityEngine:
         window = Interval(start=start, end=end)
         active_entries = await self._storage.get_active_entries(resource_id, window)
         busy = [
-            Interval(start=entry.slot_start, end=entry.slot_end) for entry in active_entries
+            Interval(start=entry.slot_start, end=entry.slot_end)
+            for entry in active_entries
         ]
 
         fragments = free_fragments(hours, busy, resource.capacity)
@@ -49,7 +52,10 @@ class AvailabilityEngine:
             status = (
                 SlotStatus.BOOKED if remaining_capacity <= 0 else SlotStatus.AVAILABLE
             )
-            for slot_interval in grid_slots(fragment, resource.slot_duration, resource.buffer):
+            slot_intervals = grid_slots(
+                fragment, resource.slot_duration, resource.buffer
+            )
+            for slot_interval in slot_intervals:
                 slots.append(
                     PublicSlot(
                         start=slot_interval.start,
@@ -76,7 +82,7 @@ class AvailabilityEngine:
             resource_id, interval, resource.capacity, ttl_seconds
         )
 
-    async def confirm_hold(self, hold_id: str, payload: dict) -> Booking:
+    async def confirm_hold(self, hold_id: str, payload: dict[str, Any]) -> Booking:
         # Never log `payload` anywhere (T-01-01) — it flows only into
         # Booking.payload, untouched.
         return await self._storage.confirm_hold(hold_id, payload)
