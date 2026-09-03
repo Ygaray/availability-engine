@@ -79,6 +79,28 @@ async def test_place_hold_capacity_exhausted(sample_resource: Resource) -> None:
         )
 
 
+async def test_place_hold_rejects_inverted_or_zero_length_slot(
+    sample_resource: Resource,
+) -> None:
+    # WR-01: slot_end <= slot_start must be rejected at the boundary rather
+    # than silently stored as a corrupt-duration Hold.
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(sample_resource)
+
+    result = await engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
+    slot = result.slots[0]
+
+    with pytest.raises(ValueError, match="must be after"):
+        await engine.place_hold(
+            sample_resource.id, slot.start, slot.start, ttl_seconds=60
+        )
+
+    with pytest.raises(ValueError, match="must be after"):
+        await engine.place_hold(
+            sample_resource.id, slot.end, slot.start, ttl_seconds=60
+        )
+
+
 async def test_confirm_hold_payload_roundtrip(sample_resource: Resource) -> None:
     engine = AvailabilityEngine(InMemoryStore())
     await engine.define_resource(sample_resource)

@@ -77,6 +77,12 @@ class AvailabilityEngine:
         resource = await self._storage.get_resource(resource_id)
         if resource is None:
             raise ValueError(f"resource {resource_id!r} not found")
+        if slot_end <= slot_start:
+            # WR-01: reject inverted/zero-length slots at the boundary,
+            # before they're stored as a corrupt-duration Hold/Booking.
+            raise ValueError(
+                f"slot_end ({slot_end}) must be after slot_start ({slot_start})"
+            )
         interval = Interval(start=slot_start, end=slot_end)
         return await self._storage.place_hold(
             resource_id, interval, resource.capacity, ttl_seconds
