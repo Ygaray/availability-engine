@@ -7,13 +7,13 @@ message can ever carry consumer payload contents (Security Domain, T-01-01).
 
 from __future__ import annotations
 
-from typing import Any
+from availability_engine.core.intervals import Interval
 
 
 class CapacityExhaustedError(Exception):
     """Raised when a hold is requested but the resource's capacity is full."""
 
-    def __init__(self, resource_id: str, slot: Any) -> None:
+    def __init__(self, resource_id: str, slot: Interval) -> None:
         self.resource_id = resource_id
         self.slot = slot
         super().__init__(f"capacity exhausted for resource {resource_id!r}")
