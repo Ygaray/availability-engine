@@ -24,6 +24,12 @@ packages = ["src/availability_engine"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# contract_suite.py deliberately doesn't match "test_*.py" (it's a shared,
+# imported suite, not a standalone test entry point) but must still be
+# collected by a plain `pytest` invocation so Phase 4's SQLStore addition to
+# its parametrize list is actually exercised by CI, not just by hand-typing
+# the file path (STORE-02).
+python_files = ["test_*.py", "*_test.py", "contract_suite.py"]
 
 [tool.ruff]
 target-version = "py312"
