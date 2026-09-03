@@ -1,4 +1,4 @@
-"""Sweep-line capacity-aware free-fragment computation (AVAIL-01).
+"""Capacity-aware free-fragment computation (AVAIL-01).
 
 This is the primitive that generalizes to capacity >= 1 from day one — Phase
 1's own test scope stops at straightforward capacity >= 1 cases; property-
@@ -18,10 +18,12 @@ def free_fragments(
     overlapping `busy` intervals is constant, emit
     `(sub_interval, capacity - active_count)`.
 
-    Sweep-line event-counting: build (time, delta) events from `busy`
-    interval boundaries (+1 at start, -1 at end), sweep chronologically
-    tracking `active_count`, and emit a fragment for each constant-count
-    span within the `hours` intervals.
+    Boundary points are harvested via `busy` interval start/end event
+    timestamps (a start/end event pair per `busy` interval, sorted so a
+    start at the same instant as an end is ordered first); the count for
+    each resulting constant-count segment is then computed directly against
+    `busy` (a linear scan per segment, not an incrementally-maintained
+    running counter) within each `hours` interval.
     """
     results: list[tuple[Interval, int]] = []
 
