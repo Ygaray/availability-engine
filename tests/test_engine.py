@@ -1,7 +1,10 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from availability_engine.contracts import Resource, SlotStatus
 from availability_engine.engine import AvailabilityEngine
+from availability_engine.errors import CapacityExhaustedError, HoldNotFoundError
 from availability_engine.storage.memory import InMemoryStore
 
 # 2026-09-07 is a Monday. The window below (UTC) fully covers that Monday's
@@ -55,3 +58,74 @@ async def test_get_availability_end_to_end(sample_resource: Resource) -> None:
         s for s in result_after_release.slots if s.start == second_slot.start
     )
     assert released_slot.status == SlotStatus.AVAILABLE
+
+
+async def test_place_hold_capacity_exhausted(sample_resource: Resource) -> None:
+    # sample_resource.capacity == 1 — a second hold on the exact same slot
+    # must be rejected, not silently accepted (T-01-05).
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(sample_resource)
+
+    result = await engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
+    slot = result.slots[0]
+
+    await engine.place_hold(
+        sample_resource.id, slot.start, slot.end, ttl_seconds=60
+    )
+
+    with pytest.raises(CapacityExhaustedError):
+        await engine.place_hold(
+            sample_resource.id, slot.start, slot.end, ttl_seconds=60
+        )
+
+
+async def test_confirm_hold_payload_roundtrip(sample_resource: Resource) -> None:
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(sample_resource)
+
+    result = await engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
+    first_slot = result.slots[0]
+    second_slot = next(s for s in result.slots if s.start != first_slot.start)
+
+    sentinel_payload = {"secret_field": "sentinel-value-42"}
+
+    hold = await engine.place_hold(
+        sample_resource.id, first_slot.start, first_slot.end, ttl_seconds=60
+    )
+    booking = await engine.confirm_hold(hold.id, payload=sentinel_payload)
+    assert booking.payload == sentinel_payload
+
+    second_hold = await engine.place_hold(
+        sample_resource.id, second_slot.start, second_slot.end, ttl_seconds=60
+    )
+    await engine.confirm_hold(second_hold.id, payload=sentinel_payload)
+
+    # second_hold is already consumed by the confirm above — confirming it
+    # again must raise, and the raised exception must never carry the
+    # opaque payload's contents in its message (T-01-01).
+    with pytest.raises(HoldNotFoundError) as exc_info:
+        await engine.confirm_hold(second_hold.id, payload=sentinel_payload)
+
+    assert "sentinel-value-42" not in str(exc_info.value)
+
+
+async def test_release_hold_frees_capacity(sample_resource: Resource) -> None:
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(sample_resource)
+
+    result = await engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
+    slot = result.slots[0]
+
+    hold = await engine.place_hold(
+        sample_resource.id, slot.start, slot.end, ttl_seconds=60
+    )
+    await engine.release_hold(hold.id)
+
+    # capacity-1 resource: the freed slot accepts a fresh hold immediately
+    new_hold = await engine.place_hold(
+        sample_resource.id, slot.start, slot.end, ttl_seconds=60
+    )
+    assert new_hold.slot_start == slot.start
+
+    # idempotent: releasing an already-released hold id does not raise
+    await engine.release_hold(hold.id)
