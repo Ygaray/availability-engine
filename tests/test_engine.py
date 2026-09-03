@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -10,8 +10,8 @@ from availability_engine.storage.memory import InMemoryStore
 # 2026-09-07 is a Monday. The window below (UTC) fully covers that Monday's
 # calendar date in every timezone, so it always contains sample_resource's
 # Monday 09:00-17:00 America/Chicago operating hours.
-WINDOW_START = datetime(2026, 9, 7, 0, 0, tzinfo=timezone.utc)
-WINDOW_END = datetime(2026, 9, 8, 0, 0, tzinfo=timezone.utc)
+WINDOW_START = datetime(2026, 9, 7, 0, 0, tzinfo=UTC)
+WINDOW_END = datetime(2026, 9, 8, 0, 0, tzinfo=UTC)
 
 
 async def test_canary() -> None:
