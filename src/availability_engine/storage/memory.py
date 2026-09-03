@@ -78,8 +78,17 @@ class InMemoryStore:
         idempotency_key: str | None = None,
     ) -> Hold:
         async with self._lock:
+            # WR-03: re-read the authoritative capacity from our own store
+            # under the lock rather than trusting the caller-supplied
+            # snapshot — closes the race where a concurrent
+            # `define_resource` changes capacity between the caller's read
+            # and this lock acquisition. Fall back to the caller-supplied
+            # `capacity` only if the resource isn't tracked here (shouldn't
+            # happen via the engine facade, which already validates it).
+            resource = self._resources.get(resource_id)
+            effective_capacity = resource.capacity if resource is not None else capacity
             active = self._count_active(resource_id, slot)
-            if active >= capacity:
+            if active >= effective_capacity:
                 raise CapacityExhaustedError(resource_id, slot)
             hold = Hold(
                 id=str(uuid.uuid4()),

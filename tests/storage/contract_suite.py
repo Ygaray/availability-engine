@@ -11,6 +11,7 @@ import pytest
 
 from availability_engine.contracts import Resource
 from availability_engine.core.intervals import Interval
+from availability_engine.errors import CapacityExhaustedError
 from availability_engine.storage.memory import InMemoryStore
 
 
@@ -51,3 +52,27 @@ class TestStorageContractSuite:
         entries = await backend.get_active_entries(sample_resource.id, slot)
 
         assert hold in entries
+
+    async def test_place_hold_uses_authoritative_stored_capacity(
+        self, backend_factory: type[InMemoryStore], sample_resource: Resource
+    ) -> None:
+        # WR-03: the backend must enforce capacity from its own resource
+        # record, not blindly trust a caller-supplied `capacity` snapshot
+        # that may be stale (e.g. a concurrent `define_resource` changed
+        # it). sample_resource.capacity == 1; a caller passing a wildly
+        # wrong capacity=100 must still be rejected on the second hold.
+        backend = backend_factory()
+        await backend.save_resource(sample_resource)
+        slot = Interval(
+            start=datetime(2026, 9, 7, 15, 0, tzinfo=UTC),
+            end=datetime(2026, 9, 7, 15, 30, tzinfo=UTC),
+        )
+
+        await backend.place_hold(
+            sample_resource.id, slot, capacity=100, ttl_seconds=60
+        )
+
+        with pytest.raises(CapacityExhaustedError):
+            await backend.place_hold(
+                sample_resource.id, slot, capacity=100, ttl_seconds=60
+            )
