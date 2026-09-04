@@ -237,3 +237,9 @@ async def test_concurrent_confirm_and_release_never_leaves_phantom_booking(
             # correct no-op against an already-consumed hold.
             assert len(active) == 1
             assert isinstance(active[0], Booking)
+            # Free the capacity-1 slot before the next iteration's
+            # place_hold — a legitimate "confirm wins" outcome must not
+            # poison every subsequent iteration with a permanently
+            # occupied slot (the Booking id equals the original hold.id
+            # per confirm_hold's insert).
+            await store.cancel_booking(hold.id)
