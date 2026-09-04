@@ -108,12 +108,13 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. A concurrency test runs N parallel `place_hold` calls against a capacity-K resource on real Postgres (testcontainers) and proves at most K succeed — no overbooking under OS-level concurrent connections.
   4. The SQL schema ships with versioned migrations from the first commit (initial migration = current schema), applied and tested against both SQLite and Postgres.
 
-**Plans**: 4 plans
+**Plans**: 3/4 plans executed
 
 Plans:
-- [ ] 04-01-PLAN.md — Tracer: SQL schema, dialect-aware locking (advisory lock/BEGIN IMMEDIATE), and a complete SQLStore proven end-to-end against SQLite via the shared contract suite
-- [ ] 04-02-PLAN.md — Postgres dialect wiring: real testcontainers Postgres fixtures, three-way contract-suite parametrization, dialect parity fixes
-- [ ] 04-03-PLAN.md — Alembic migrations (initial schema, both dialects) + D-05 aiosqlite loop-responsiveness verification
+
+- [x] 04-01-PLAN.md — Tracer: SQL schema, dialect-aware locking (advisory lock/BEGIN IMMEDIATE), and a complete SQLStore proven end-to-end against SQLite via the shared contract suite
+- [x] 04-02-PLAN.md — Postgres dialect wiring: real testcontainers Postgres fixtures, three-way contract-suite parametrization, dialect parity fixes
+- [x] 04-03-PLAN.md — Alembic migrations (initial schema, both dialects) + D-05 aiosqlite loop-responsiveness verification
 - [ ] 04-04-PLAN.md — HOLD-02 concurrency proof (N concurrent OS-level connections vs. capacity-K on real Postgres) + full-suite phase gate
 
 ### Phase 5: Packaging, Docs & v1 Release
@@ -141,7 +142,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 1. End-to-End Walking Skeleton (In-Memory) | 3/3 | Complete    | 2026-09-03 |
 | 2. Capacity & Time Correctness | 3/3 | Complete    | 2026-09-04 |
 | 3. Idempotency & Cancellation | 2/2 | Complete    | 2026-09-04 |
-| 4. SQL Backend & Concurrency Proof | 0/4 | Not started | - |
+| 4. SQL Backend & Concurrency Proof | 3/4 | In Progress|  |
 | 5. Packaging, Docs & v1 Release | 0/TBD | Not started | - |
 </content>
 </invoke>
