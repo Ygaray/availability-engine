@@ -44,8 +44,8 @@ created: 2026-09-03
 | 02-01-TBD | 01 | 0 | AVAIL-03 | — | Expired hold excluded from `get_active_entries()` on next read, no manual release | unit | `uv run pytest tests/storage/contract_suite.py -k expired -x` | ❌ W0 | ⬜ pending |
 | 02-01-TBD | 01 | 0 | AVAIL-04 | — | `AvailabilityResult`'s JSON schema matches the committed golden file | unit | `uv run pytest tests/test_contract_conformance.py::test_availability_result_schema_matches_golden -x` | ❌ W0 | ⬜ pending |
 | 02-01-TBD | 01 | 0 | GRID-02 | — | Spring-forward gap and fall-back doubled-hour produce no missing/duplicated/shifted slots on real 2024-2026 dates | fixture-based unit | `uv run pytest tests/core/test_grid_dst.py -x` | ❌ W0 | ⬜ pending |
-| 02-01-TBD | 01 | 0 | GRID-03 | — | Overnight `end<=start` LocalInterval produces correct UTC span, including across a DST date | fixture-based unit | `uv run pytest tests/test_time_boundary.py -k midnight -x` | ❌ W0 | ⬜ pending |
-| 02-01-TBD | 01 | 0 | HOLD-05 | — | A hold with an elapsed TTL stops counting against capacity on the very next `place_hold`, no `release_hold` call | unit (time-machine) | `uv run pytest tests/test_engine.py::test_expired_hold_stops_counting_against_capacity -x` | ❌ W0 | ⬜ pending |
+| 02-01-TBD | 01 | 0 | GRID-03 | — | Overnight `end<=start` LocalInterval produces correct UTC span, including across a DST date | fixture-based unit | `uv run pytest tests/test_time_boundary.py -x` | ❌ W0 | ⬜ pending |
+| 02-01-TBD | 01 | 0 | HOLD-05 | — | A hold with an elapsed TTL stops counting against capacity on the very next `place_hold`, no `release_hold` call | unit (time-machine) | `uv run pytest tests/test_hold_expiry.py -x` | ❌ W0 | ⬜ pending |
 | 02-01-TBD | 01 | 0 | HOLD-08 | T-V5 | `place_hold` outside operating hours raises `OutsideHoursError` with `.reason_code == ReasonCode.OUTSIDE_HOURS`; every `errors.py` exception has a non-null `.reason_code` | unit | `uv run pytest tests/test_engine.py::test_place_hold_outside_hours tests/test_errors.py::test_every_exception_has_reason_code -x` | ❌ W0 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*

@@ -1,8 +1,8 @@
 # Phase 2: Capacity & Time Correctness - Pattern Map
 
 **Mapped:** 2026-09-03
-**Files analyzed:** 9 (5 modified production, 4+ new test files)
-**Analogs found:** 9 / 9 — every file being touched is modified in place (Phase 1 wrote all of them); "analog" here means the file's OWN current content is the base to extend, since Phase 2 is a hardening/restructuring phase, not a new-module phase.
+**Files analyzed:** 12 (5 modified production, 7 new/extended test files)
+**Analogs found:** 12 / 12 — every file being touched is modified in place (Phase 1 wrote all of them); "analog" here means the file's OWN current content is the base to extend, since Phase 2 is a hardening/restructuring phase, not a new-module phase.
 
 ## File Classification
 
@@ -15,9 +15,12 @@
 | `src/availability_engine/engine.py` | service (facade) | request-response | itself (`get_availability`/`place_hold`, lines 34-100) | exact — in-place extend |
 | `tests/core/test_availability.py` (NEW) | test (hypothesis property) | transform | `tests/core/test_grid.py` (structure) + `core/availability.py` (subject) | role-match |
 | `tests/core/test_grid_dst.py` (NEW) | test (fixture) | transform | `tests/core/test_grid.py` (full file, structure/style) | exact style-match |
-| `tests/core/test_time_boundary.py` (NEW) | test (fixture) | transform | `tests/core/test_grid.py` (structure/style) | exact style-match |
+| `tests/test_time_boundary.py` (NEW) | test (fixture) | transform | `tests/core/test_grid.py` (structure/style) | exact style-match |
 | `tests/test_contract_conformance.py` (NEW) | test (golden-file) | transform | `tests/test_contracts.py` (Pydantic contract testing conventions) | role-match |
 | `tests/test_engine.py` (EXTENDED) | test (integration) | request-response | itself (`test_get_availability_end_to_end`, lines 25-50) | exact — extend in place |
+| `tests/test_hold_expiry.py` (NEW) | test (integration, time-machine) | request-response | `tests/test_engine.py` (drives `AvailabilityEngine.place_hold` end-to-end, same facade-level style) | role-match |
+| `tests/test_errors.py` (NEW) | test (exhaustiveness) | request-response | `src/availability_engine/errors.py` (subject under test — iterates its concrete exception classes) | role-match |
+| `tests/golden/availability_result.schema.json` (NEW) | fixture (golden-data, JSON schema snapshot) | data-at-rest | `tests/test_contract_conformance.py` (sole consumer/generator of this file, Pattern 5) | role-match |
 
 ## Pattern Assignments
 
@@ -224,7 +227,7 @@ Add the `OutsideHoursError` containment check in this same style, reusing `time_
 
 ---
 
-### `tests/core/test_time_boundary.py` (NEW test, fixture-based)
+### `tests/test_time_boundary.py` (NEW test, fixture-based)
 
 **Analog:** `tests/core/test_grid.py` (structure/style) + the module under test is `time.py::localize_operating_hours`.
 
