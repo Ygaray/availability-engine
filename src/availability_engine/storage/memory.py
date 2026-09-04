@@ -51,9 +51,13 @@ class InMemoryStore:
                 # Active iff expires_at > now — the same predicate
                 # confirm_hold already uses correctly below. Lazy release:
                 # the expired Hold record stays in _holds (HOLD-05) until an
-                # explicit release_hold/confirm_hold call; it is simply
-                # excluded from counting as active on this and every
-                # subsequent read.
+                # explicit release_hold call, or a confirm_hold call that
+                # succeeds (i.e. one made *before* expiry — confirm_hold on
+                # an already-expired hold raises HoldExpiredError and does
+                # NOT delete the record; see confirm_hold below). Either
+                # way, it is simply excluded from counting as active on
+                # this and every subsequent read regardless of whether the
+                # record still exists (IN-01).
                 continue
             hold_interval = Interval(start=hold.slot_start, end=hold.slot_end)
             if overlaps(hold_interval, window):
