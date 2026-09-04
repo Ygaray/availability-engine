@@ -6,6 +6,10 @@ requires-python = ">=3.12"
 dependencies = [
     "pydantic==2.13.5",
     "tzdata==2026.3",
+    "sqlalchemy>=2.0,<2.1",
+    "asyncpg==0.31.0",
+    "aiosqlite==0.22.1",
+    "alembic==1.19.1",
 ]
 
 [dependency-groups]
@@ -16,6 +20,7 @@ dev = [
     "mypy==2.3.1",
     "time-machine==3.5.0",
     "hypothesis==6.167.1",
+    "testcontainers[postgres]==4.15.0",
 ]
 
 [build-system]
