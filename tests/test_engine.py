@@ -525,3 +525,51 @@ async def test_idempotency_key_scoped_per_operation_type(
         idempotency_key="shared-key",
     )
     assert hold.slot_start == second_slot.start
+
+
+async def test_confirm_hold_idempotency_conflict(sample_resource: Resource) -> None:
+    # WR-01: mirrors test_place_hold_idempotency_conflict for confirm_hold —
+    # same idempotency_key with a materially different payload raises
+    # IdempotencyConflictError rather than silently returning either a stale
+    # result or double-acting.
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(sample_resource)
+
+    result = await engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
+    slot = result.available[0]
+    hold = await engine.place_hold(
+        sample_resource.id, slot.start, slot.end, ttl_seconds=60
+    )
+
+    await engine.confirm_hold(
+        hold.id, payload={"order_id": "a"}, idempotency_key="conflict-c"
+    )
+
+    with pytest.raises(IdempotencyConflictError) as exc_info:
+        await engine.confirm_hold(
+            hold.id, payload={"order_id": "b"}, idempotency_key="conflict-c"
+        )
+
+    assert exc_info.value.reason_code == ReasonCode.IDEMPOTENCY_CONFLICT
+
+
+async def test_confirm_hold_idempotency_payload_must_be_json_serializable(
+    sample_resource: Resource,
+) -> None:
+    # WR-02: a non-JSON-serializable payload used with an idempotency_key
+    # must raise a clear TypeError up front rather than silently producing
+    # a fingerprint via `default=str` that may not be reproducible across
+    # calls with a logically identical payload.
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(sample_resource)
+
+    result = await engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
+    slot = result.available[0]
+    hold = await engine.place_hold(
+        sample_resource.id, slot.start, slot.end, ttl_seconds=60
+    )
+
+    with pytest.raises(TypeError):
+        await engine.confirm_hold(
+            hold.id, payload={"tags": {"a", "b"}}, idempotency_key="non-json-k"
+        )

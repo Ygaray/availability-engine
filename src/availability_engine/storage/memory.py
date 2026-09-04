@@ -197,6 +197,23 @@ class InMemoryStore:
             # handle without raising a spurious HoldNotFoundError).
             fp = None
             if idempotency_key is not None:
+                if payload is not None:
+                    try:
+                        json.dumps(payload, sort_keys=True)
+                    except TypeError as exc:
+                        # WR-02: fail fast with a clear error rather than
+                        # silently falling back to _fingerprint's
+                        # `default=str` for non-JSON-native payload values —
+                        # str() of an arbitrary object (e.g. default object
+                        # repr, a set's insertion-order-dependent repr) is
+                        # not guaranteed to be a pure function of the
+                        # payload's logical value, which could otherwise
+                        # misclassify a legitimate retry as a conflict.
+                        raise TypeError(
+                            "confirm_hold payload must be JSON-serializable "
+                            "with stable-value semantics for idempotency "
+                            "fingerprinting"
+                        ) from exc
                 fp = _fingerprint(hold_id, payload)
                 existing = self._idempotency.get(("confirm_hold", idempotency_key))
                 if existing is not None:
