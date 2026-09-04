@@ -35,9 +35,9 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
-from availability_engine.contracts import LocalInterval, Resource, Weekday
+from availability_engine.contracts import Booking, LocalInterval, Resource, Weekday
 from availability_engine.core.intervals import Interval
-from availability_engine.errors import CapacityExhaustedError
+from availability_engine.errors import CapacityExhaustedError, HoldNotFoundError
 from availability_engine.storage.sql import models
 from availability_engine.storage.sql.store import SQLStore
 
@@ -178,3 +178,62 @@ async def test_concurrent_place_hold_never_exceeds_capacity_k3(
         assert isinstance(exc, CapacityExhaustedError), (
             f"expected CapacityExhaustedError, got {type(exc)!r}: {exc!r}"
         )
+
+
+async def test_concurrent_confirm_and_release_never_leaves_phantom_booking(
+    concurrency_pg_engine: AsyncEngine,
+) -> None:
+    # CR-01 regression: confirm_hold must never materialize a Booking from
+    # its pre-DELETE hold_row snapshot when that row was concurrently
+    # removed by release_hold between confirm_hold's SELECT and its own
+    # DELETE (DELETE matches 0 rows). Runs many real concurrent iterations
+    # against genuinely independent connections (matching this file's
+    # existing approach — no forced single interleaving) so some
+    # iterations empirically land in that exact race window.
+    store = SQLStore(concurrency_pg_engine)
+    resource = _make_resource("concurrency-cr01", capacity=1)
+    await store.save_resource(resource)
+    slot = Interval(
+        start=datetime(2026, 9, 7, 15, 0, tzinfo=UTC),
+        end=datetime(2026, 9, 7, 15, 30, tzinfo=UTC),
+    )
+
+    iterations = 50
+    for _ in range(iterations):
+        hold = await store.place_hold(
+            resource.id, slot, capacity=resource.capacity, ttl_seconds=60
+        )
+
+        confirm_result, release_result = await asyncio.gather(
+            store.confirm_hold(hold.id),
+            store.release_hold(hold.id),
+            return_exceptions=True,
+        )
+
+        # release_hold is documented as an idempotent no-op regardless of
+        # whether the hold still exists — it must never raise here.
+        assert not isinstance(release_result, Exception), release_result
+
+        active = await store.get_active_entries(resource.id, slot)
+
+        if isinstance(confirm_result, HoldNotFoundError):
+            # release_hold "won" this iteration's race — confirm_hold
+            # correctly detected its DELETE matched 0 rows and raised,
+            # rather than materializing a phantom Booking from the stale
+            # hold_row snapshot (the CR-01 bug). The slot must be fully
+            # free again, not still occupied by a phantom Booking.
+            assert active == [], (
+                "CR-01 regression: confirm_hold lost the race to a "
+                f"concurrent release_hold but left {active!r} active — a "
+                "phantom Booking or stray Hold survived a release."
+            )
+        elif isinstance(confirm_result, Exception):
+            raise AssertionError(
+                f"unexpected exception from confirm_hold: {confirm_result!r}"
+            )
+        else:
+            # confirm_hold "won" the race — a legitimate Booking now
+            # occupies the slot; release_hold's concurrent DELETE was a
+            # correct no-op against an already-consumed hold.
+            assert len(active) == 1
+            assert isinstance(active[0], Booking)
