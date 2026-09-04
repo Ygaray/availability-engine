@@ -1,0 +1,82 @@
+"""The ONE dialect-branch point in the whole SQL backend (RESEARCH.md
+Pattern 1). Every other query anywhere in `store.py` stays dialect-agnostic
+SQLAlchemy Core.
+
+**Supersedes CONTEXT.md's D-01.** D-01 ("defer `SELECT ... FOR UPDATE`,
+rely solely on the atomic `INSERT ... SELECT ... WHERE (COUNT < capacity)`
+conditional write") and the Runtime Decisions section's restated "Postgres
+`SELECT ... FOR UPDATE`" are BOTH unsafe against genuinely concurrent
+Postgres connections for this schema: `FOR UPDATE` cannot lock a row that
+does not yet exist, so two concurrent transactions can both count zero
+prior holds for an empty slot and both insert, overbooking capacity 1 to 2
+(cybertec-postgresql.com's documented Postgres phantom-insert analysis,
+04-01-PLAN.md RESEARCH.md). This module instead acquires a Postgres
+transaction-scoped advisory lock (`pg_advisory_xact_lock`, keyed on
+`(resource_id, slot_start)`) as the first statement of `place_hold`'s
+transaction, auto-released on commit/rollback — a schema-preserving,
+`READ COMMITTED`-preserving correction (D-04's isolation level is
+untouched), not a new design. Wave 3's HOLD-02 concurrency test is the
+empirical arbiter of this fix.
+"""
+
+from sqlalchemy import event, text
+from sqlalchemy.engine import Connection
+from sqlalchemy.engine.interfaces import DBAPIConnection
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
+from sqlalchemy.pool import ConnectionPoolEntry
+
+
+async def acquire_postgres_slot_lock(
+    conn: AsyncConnection, resource_id: str, slot_start_iso: str
+) -> None:
+    """Acquire a transaction-scoped Postgres advisory lock keyed on
+    `(resource_id, slot_start)`, serializing concurrent `place_hold` (and
+    only `place_hold` — see store.py's module docstring) attempts for the
+    SAME slot without needing any pre-existing row to lock. Auto-released on
+    commit/rollback — no leak risk even on a crashed connection.
+
+    Never f-string-interpolate `resource_id`/`slot_start_iso` into SQL text
+    (T-04-02 SQL-injection mitigation) — named bind parameters only. A rare
+    `hashtext` collision between two different (resource_id, slot_start)
+    pairs would only ever over-serialize two unrelated slots, never cause
+    overbooking (RESEARCH.md Assumption A1).
+    """
+    await conn.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:rid), hashtext(:slot))"),
+        {"rid": resource_id, "slot": slot_start_iso},
+    )
+
+
+def attach_sqlite_begin_immediate(engine: AsyncEngine) -> None:
+    """Register the two-event-listener recipe that gives SQLite a whole-
+    database RESERVED write lock (BEGIN IMMEDIATE) for every transaction —
+    phantom-safe by construction, no advisory-lock equivalent needed.
+
+    - "connect": disable aiosqlite's implicit BEGIN (RESEARCH.md Pitfall 3)
+      and set WAL mode + a 5s busy timeout (CONTEXT.md's D-04 explicit
+      SQLite resolution).
+    - "begin": issue BEGIN IMMEDIATE instead of the driver's default
+      DEFERRED transaction.
+    """
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _do_connect(
+        dbapi_connection: DBAPIConnection, connection_record: ConnectionPoolEntry
+    ) -> None:
+        # Disables aiosqlite's implicit BEGIN so our own explicit
+        # BEGIN IMMEDIATE (below) is the one that actually takes effect.
+        dbapi_connection.isolation_level = None
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.close()
+
+    @event.listens_for(engine.sync_engine, "begin")
+    def _do_begin(conn: Connection) -> None:
+        # Whole-database RESERVED write lock, phantom-safe by construction —
+        # only ever one writer transaction on a SQLite file at a time under
+        # this mode.
+        conn.exec_driver_sql("BEGIN IMMEDIATE")
+
+
+__all__ = ["acquire_postgres_slot_lock", "attach_sqlite_begin_immediate"]
