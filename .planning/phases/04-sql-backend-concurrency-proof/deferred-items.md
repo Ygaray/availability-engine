@@ -47,3 +47,20 @@ SCOPE BOUNDARY rule (pre-existing, not caused by this task's changes).
   Python `dict` and `Booking`'s `payload: dict[str, Any]` Pydantic field would have
   raised a validation error on any test if it hadn't; `_ensure_utc` already normalizes
   both dialects' datetime round-trips).
+
+## 04-04 (Task 2)
+
+- **Same 6 pre-existing `ruff check` E501 violations, re-confirmed at the Phase 4 gate.**
+  `uv run ruff check` (whole repo) still surfaces exactly the same 6 lines logged under
+  04-01/04-02 above — `src/availability_engine/storage/memory.py:138` and 5 long
+  `test_*` method-name definition lines in `tests/storage/contract_suite.py` — confirmed
+  unchanged via `git diff d8f246e HEAD -- src/availability_engine/storage/memory.py
+  tests/storage/contract_suite.py` (zero diff on the offending lines). This plan's own
+  new file, `tests/storage/test_concurrency_proof.py`, initially introduced 2 more E501
+  violations (two `store.place_hold(...)` call lines at 91 chars); these were in-scope
+  (caused by this task's own new file) and were fixed inline before the Task 2 commit —
+  `tests/storage/test_concurrency_proof.py` is individually `ruff check`-clean.
+- **Full project-wide green run:** `uv run pytest` — 110 passed. `uv run mypy --strict
+  src` — clean, no issues in 16 source files. `git diff d8f246e HEAD --
+  src/availability_engine/engine.py src/availability_engine/contracts.py` — empty diff,
+  confirming no task across the entire phase touched either file (Success Criterion #2).

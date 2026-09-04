@@ -115,7 +115,9 @@ async def test_concurrent_place_hold_never_exceeds_capacity_k1(
     n = 25
     results = await asyncio.gather(
         *(
-            store.place_hold(resource.id, slot, capacity=resource.capacity, ttl_seconds=60)
+            store.place_hold(
+                resource.id, slot, capacity=resource.capacity, ttl_seconds=60
+            )
             for _ in range(n)
         ),
         return_exceptions=True,
@@ -156,7 +158,9 @@ async def test_concurrent_place_hold_never_exceeds_capacity_k3(
     n = 30
     results = await asyncio.gather(
         *(
-            store.place_hold(resource.id, slot, capacity=resource.capacity, ttl_seconds=60)
+            store.place_hold(
+                resource.id, slot, capacity=resource.capacity, ttl_seconds=60
+            )
             for _ in range(n)
         ),
         return_exceptions=True,
