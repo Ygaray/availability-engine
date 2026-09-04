@@ -146,3 +146,7 @@ None — no external service configuration required.
 ---
 *Phase: 02-capacity-time-correctness*
 *Completed: 2026-09-03*
+
+## Self-Check: PASSED
+
+All created/modified files verified present (`src/availability_engine/storage/memory.py`, `tests/test_hold_expiry.py`, `tests/storage/contract_suite.py`, this SUMMARY.md). All 4 commits verified in `git log` (`cdb6fa8`, `9b2dd9c`, `6fbfd36`, `33b9990`).
