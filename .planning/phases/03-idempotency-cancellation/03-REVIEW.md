@@ -18,7 +18,7 @@ findings:
   warning: 4
   info: 2
   total: 7
-status: issues_found
+status: resolved
 ---
 
 # Phase 03: Code Review Report
