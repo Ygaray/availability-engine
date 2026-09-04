@@ -1,12 +1,13 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from availability_engine.contracts import Resource, SlotStatus
+from availability_engine.contracts import ReasonCode, Resource
 from availability_engine.engine import AvailabilityEngine
 from availability_engine.errors import (
     CapacityExhaustedError,
     HoldNotFoundError,
+    OutsideHoursError,
     ResourceNotFoundError,
 )
 from availability_engine.storage.memory import InMemoryStore
@@ -27,10 +28,10 @@ async def test_get_availability_end_to_end(sample_resource: Resource) -> None:
     await engine.define_resource(sample_resource)
 
     result = await engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
-    assert result.slots
-    assert all(slot.status == SlotStatus.AVAILABLE for slot in result.slots)
+    assert result.available
+    assert not result.booked
 
-    first_slot = result.slots[0]
+    first_slot = result.available[0]
     hold = await engine.place_hold(
         sample_resource.id, first_slot.start, first_slot.end, ttl_seconds=60
     )
@@ -45,11 +46,11 @@ async def test_get_availability_end_to_end(sample_resource: Resource) -> None:
         sample_resource.id, WINDOW_START, WINDOW_END
     )
     confirmed_slot = next(
-        s for s in result_after_confirm.slots if s.start == first_slot.start
+        s for s in result_after_confirm.booked if s.start == first_slot.start
     )
-    assert confirmed_slot.status == SlotStatus.BOOKED
+    assert confirmed_slot.remaining == 0
 
-    second_slot = next(s for s in result.slots if s.start != first_slot.start)
+    second_slot = next(s for s in result.available if s.start != first_slot.start)
     second_hold = await engine.place_hold(
         sample_resource.id, second_slot.start, second_slot.end, ttl_seconds=60
     )
@@ -59,9 +60,9 @@ async def test_get_availability_end_to_end(sample_resource: Resource) -> None:
         sample_resource.id, WINDOW_START, WINDOW_END
     )
     released_slot = next(
-        s for s in result_after_release.slots if s.start == second_slot.start
+        s for s in result_after_release.available if s.start == second_slot.start
     )
-    assert released_slot.status == SlotStatus.AVAILABLE
+    assert released_slot.remaining == released_slot.capacity
 
 
 async def test_place_hold_capacity_exhausted(sample_resource: Resource) -> None:
@@ -71,7 +72,7 @@ async def test_place_hold_capacity_exhausted(sample_resource: Resource) -> None:
     await engine.define_resource(sample_resource)
 
     result = await engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
-    slot = result.slots[0]
+    slot = result.available[0]
 
     await engine.place_hold(
         sample_resource.id, slot.start, slot.end, ttl_seconds=60
@@ -92,7 +93,7 @@ async def test_place_hold_rejects_inverted_or_zero_length_slot(
     await engine.define_resource(sample_resource)
 
     result = await engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
-    slot = result.slots[0]
+    slot = result.available[0]
 
     with pytest.raises(ValueError, match="must be after"):
         await engine.place_hold(
@@ -110,8 +111,8 @@ async def test_confirm_hold_payload_roundtrip(sample_resource: Resource) -> None
     await engine.define_resource(sample_resource)
 
     result = await engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
-    first_slot = result.slots[0]
-    second_slot = next(s for s in result.slots if s.start != first_slot.start)
+    first_slot = result.available[0]
+    second_slot = next(s for s in result.available if s.start != first_slot.start)
 
     sentinel_payload = {"secret_field": "sentinel-value-42"}
 
@@ -178,7 +179,7 @@ async def test_release_hold_frees_capacity(sample_resource: Resource) -> None:
     await engine.define_resource(sample_resource)
 
     result = await engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
-    slot = result.slots[0]
+    slot = result.available[0]
 
     hold = await engine.place_hold(
         sample_resource.id, slot.start, slot.end, ttl_seconds=60
@@ -193,3 +194,22 @@ async def test_release_hold_frees_capacity(sample_resource: Resource) -> None:
 
     # idempotent: releasing an already-released hold id does not raise
     await engine.release_hold(hold.id)
+
+
+async def test_place_hold_outside_hours(sample_resource: Resource) -> None:
+    # HOLD-08: place_hold must reject a request entirely outside the
+    # resource's declared operating hours (sample_resource only has hours
+    # defined for Monday). 2026-09-08 is a Tuesday — outside any declared
+    # LocalInterval for this resource.
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(sample_resource)
+
+    slot_start = datetime(2026, 9, 8, 10, 0, tzinfo=UTC)
+    slot_end = slot_start + timedelta(minutes=30)
+
+    with pytest.raises(OutsideHoursError) as exc_info:
+        await engine.place_hold(
+            sample_resource.id, slot_start, slot_end, ttl_seconds=60
+        )
+
+    assert exc_info.value.reason_code == ReasonCode.OUTSIDE_HOURS
