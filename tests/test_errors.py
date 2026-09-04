@@ -42,3 +42,15 @@ def test_new_error_names_importable_from_top_level_package() -> None:
 
     assert BookingNotFoundError is not None
     assert BookingStatus is not None
+
+
+def test_reason_code_importable_from_top_level_package() -> None:
+    # WR-03: ReasonCode.IDEMPOTENCY_CONFLICT is a value consumers need to
+    # match against per this module's docstring ("inspect .reason_code to
+    # branch without string-matching the exception type"), but ReasonCode
+    # itself was never re-exported from __init__.py — the same export-barrel
+    # omission class the test above guards for BookingStatus.
+    from availability_engine import ReasonCode
+
+    assert ReasonCode is not None
+    assert ReasonCode.IDEMPOTENCY_CONFLICT is not None
