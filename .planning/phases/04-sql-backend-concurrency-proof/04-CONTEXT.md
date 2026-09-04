@@ -85,5 +85,13 @@ The concurrency proof must use genuinely concurrent OS-level connections (testco
 
 ---
 
+## Runtime Decisions
+
+*Refreshed at milestone-execution time from real Phase 1–3 output (provisional → resolved, source: ai-auto).*
+
+- **Schema (was provisional, depends-on Phase 3 — now resolved):** Use **separate `holds` and `bookings` tables**, mirroring the landed in-memory `_holds`/`_bookings` split. They are structurally different: a `Hold` carries `expires_at` (lazy expiry, no TTL eviction — IN-01); a `Booking` carries a `status` column (ACTIVE/CANCELLED) and a JSONB opaque-`payload` column. A confirmed hold is **deleted** and a booking is inserted with the **same id**. A distinct **idempotency table** keyed by `(operation_type, idempotency_key)` stores the fingerprint + a reference to the result row, and needs an explicit retention/cleanup policy (an unbounded idempotency table has real operational cost in SQL). Add a `(resource_id, slot_start, status)`-equivalent index per table for the active-entries scan. Row-lock atomicity is dialect-aware: Postgres `SELECT … FOR UPDATE`, SQLite `BEGIN IMMEDIATE`. **This supersedes the earlier provisional "single physical table keyed by `status`" guess** — the Phase 1–3 code that has now landed uses separate collections, and the provisional resolution explicitly required mirroring that representation once it landed.
+
+---
+
 *Phase: 4-SQL Backend & Concurrency Proof*
 *Context gathered: 2026-09-03*
