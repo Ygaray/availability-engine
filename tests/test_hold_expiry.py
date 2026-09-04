@@ -34,7 +34,7 @@ async def test_active_hold_blocks_second_hold_while_unexpired(
     store = InMemoryStore()
     engine = AvailabilityEngine(store)
     await engine.define_resource(sample_resource)
-    slot_start = _T0 + timedelta(hours=1)
+    slot_start = _T0 + timedelta(hours=3)  # 10:00 CDT, within Mon 9-17 hours
     slot_end = slot_start + timedelta(minutes=30)
 
     with time_machine.travel(_T0, tick=False):
@@ -54,7 +54,7 @@ async def test_expired_hold_stops_blocking_capacity_with_no_explicit_release(
     store = InMemoryStore()
     engine = AvailabilityEngine(store)
     await engine.define_resource(sample_resource)
-    slot_start = _T0 + timedelta(hours=1)
+    slot_start = _T0 + timedelta(hours=3)  # 10:00 CDT, within Mon 9-17 hours
     slot_end = slot_start + timedelta(minutes=30)
 
     with time_machine.travel(_T0, tick=False):
