@@ -88,6 +88,7 @@ class AvailabilityEngine:
         slot_start: UtcDatetime,
         slot_end: UtcDatetime,
         ttl_seconds: int,
+        idempotency_key: str | None = None,
     ) -> Hold:
         resource = await self._storage.get_resource(resource_id)
         if resource is None:
@@ -108,13 +109,24 @@ class AvailabilityEngine:
             # performed this check at all (RESEARCH.md verified).
             raise OutsideHoursError(resource_id, requested)
         return await self._storage.place_hold(
-            resource_id, requested, resource.capacity, ttl_seconds
+            resource_id,
+            requested,
+            resource.capacity,
+            ttl_seconds,
+            idempotency_key=idempotency_key,
         )
 
-    async def confirm_hold(self, hold_id: str, payload: dict[str, Any]) -> Booking:
+    async def confirm_hold(
+        self,
+        hold_id: str,
+        payload: dict[str, Any],
+        idempotency_key: str | None = None,
+    ) -> Booking:
         # Never log `payload` anywhere (T-01-01) — it flows only into
         # Booking.payload, untouched.
-        return await self._storage.confirm_hold(hold_id, payload)
+        return await self._storage.confirm_hold(
+            hold_id, payload, idempotency_key=idempotency_key
+        )
 
     async def release_hold(self, hold_id: str) -> None:
         await self._storage.release_hold(hold_id)
