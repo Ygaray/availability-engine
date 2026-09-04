@@ -20,7 +20,7 @@ from availability_engine.contracts import (
 from availability_engine.core.availability import free_fragments
 from availability_engine.core.grid import grid_slots
 from availability_engine.core.intervals import Interval
-from availability_engine.errors import ResourceNotFoundError
+from availability_engine.errors import OutsideHoursError, ResourceNotFoundError
 from availability_engine.storage.protocol import StorageBackend
 
 
@@ -58,7 +58,8 @@ class AvailabilityEngine:
 
         fragments = free_fragments(hours, busy, resource.capacity)
 
-        slots: list[PublicSlot] = []
+        available: list[PublicSlot] = []
+        booked: list[PublicSlot] = []
         for fragment, remaining_capacity in fragments:
             status = (
                 SlotStatus.BOOKED if remaining_capacity <= 0 else SlotStatus.AVAILABLE
@@ -67,16 +68,19 @@ class AvailabilityEngine:
                 fragment, resource.slot_duration, resource.buffer
             )
             for slot_interval in slot_intervals:
-                slots.append(
-                    PublicSlot(
-                        start=slot_interval.start,
-                        end=slot_interval.end,
-                        resource_id=resource_id,
-                        status=status,
-                    )
+                slot = PublicSlot(
+                    start=slot_interval.start,
+                    end=slot_interval.end,
+                    resource_id=resource_id,
+                    status=status,
+                    capacity=resource.capacity,
+                    remaining=remaining_capacity,
                 )
+                (available if remaining_capacity > 0 else booked).append(slot)
 
-        return AvailabilityResult(resource_id=resource_id, slots=slots)
+        return AvailabilityResult(
+            resource_id=resource_id, available=available, booked=booked
+        )
 
     async def place_hold(
         self,
@@ -94,9 +98,17 @@ class AvailabilityEngine:
             raise ValueError(
                 f"slot_end ({slot_end}) must be after slot_start ({slot_start})"
             )
-        interval = Interval(start=slot_start, end=slot_end)
+        requested = Interval(start=slot_start, end=slot_end)
+        hours = time_boundary.localize_operating_hours(resource, slot_start, slot_end)
+        if not any(
+            h.start <= requested.start and requested.end <= h.end for h in hours
+        ):
+            # HOLD-08: a requested hold entirely outside the resource's
+            # declared operating hours is rejected here — Phase 1 never
+            # performed this check at all (RESEARCH.md verified).
+            raise OutsideHoursError(resource_id, requested)
         return await self._storage.place_hold(
-            resource_id, interval, resource.capacity, ttl_seconds
+            resource_id, requested, resource.capacity, ttl_seconds
         )
 
     async def confirm_hold(self, hold_id: str, payload: dict[str, Any]) -> Booking:

@@ -1,0 +1,80 @@
+{
+  "$defs": {
+    "PublicSlot": {
+      "properties": {
+        "start": {
+          "format": "date-time",
+          "title": "Start",
+          "type": "string"
+        },
+        "end": {
+          "format": "date-time",
+          "title": "End",
+          "type": "string"
+        },
+        "resource_id": {
+          "title": "Resource Id",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/SlotStatus"
+        },
+        "capacity": {
+          "minimum": 1,
+          "title": "Capacity",
+          "type": "integer"
+        },
+        "remaining": {
+          "minimum": 0,
+          "title": "Remaining",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "resource_id",
+        "status",
+        "capacity",
+        "remaining"
+      ],
+      "title": "PublicSlot",
+      "type": "object"
+    },
+    "SlotStatus": {
+      "enum": [
+        "available",
+        "booked"
+      ],
+      "title": "SlotStatus",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "resource_id": {
+      "title": "Resource Id",
+      "type": "string"
+    },
+    "available": {
+      "items": {
+        "$ref": "#/$defs/PublicSlot"
+      },
+      "title": "Available",
+      "type": "array"
+    },
+    "booked": {
+      "items": {
+        "$ref": "#/$defs/PublicSlot"
+      },
+      "title": "Booked",
+      "type": "array"
+    }
+  },
+  "required": [
+    "resource_id",
+    "available",
+    "booked"
+  ],
+  "title": "AvailabilityResult",
+  "type": "object"
+}

@@ -91,11 +91,25 @@ class Resource(BaseModel):
 class SlotStatus(StrEnum):
     AVAILABLE = "available"
     BOOKED = "booked"
-    # NOTE: Phase 2 (AVAIL-02) needs the two-list available/booked split with an
-    # explicit capacity_remaining int per FEATURES.md's capacity-shape gray area.
-    # Phase 1 ships a single flat list with a `status` field per slot as the
-    # walking-skeleton minimum — field names chosen so Phase 2 can extend
-    # additively (add capacity_remaining as a new field) rather than restructure.
+    # Phase 2 (D-04) split AvailabilityResult into two lists (`available`/
+    # `booked`) rather than a flat `slots` list — list membership now encodes
+    # status, but `status` itself is kept on PublicSlot as a shipped,
+    # derivable convenience field (RESEARCH.md Pattern 1's recommendation:
+    # removing it would be a separate, reversible decision, not a Phase-2
+    # requirement).
+
+
+class ReasonCode(StrEnum):
+    """Closed, one-way enum (D-03) — a consumer can exhaustiveness-match on
+    this. `IDEMPOTENCY_CONFLICT` is reserved: only Phase 3 raises it, but it
+    is pre-included here so widening the enum later isn't required.
+    """
+
+    CAPACITY_EXHAUSTED = "capacity_exhausted"
+    OUTSIDE_HOURS = "outside_hours"
+    HOLD_EXPIRED = "hold_expired"
+    NOT_FOUND = "not_found"
+    IDEMPOTENCY_CONFLICT = "idempotency_conflict"
 
 
 class PublicSlot(BaseModel):
@@ -104,12 +118,15 @@ class PublicSlot(BaseModel):
     end: UtcDatetime
     resource_id: str
     status: SlotStatus
+    capacity: Annotated[int, Field(ge=1)]
+    remaining: Annotated[int, Field(ge=0)]
 
 
 class AvailabilityResult(BaseModel):
     model_config = ConfigDict(frozen=True)
     resource_id: str
-    slots: list[PublicSlot]
+    available: list[PublicSlot]
+    booked: list[PublicSlot]
 
 
 class Hold(BaseModel):
