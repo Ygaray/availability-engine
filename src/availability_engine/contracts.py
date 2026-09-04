@@ -8,6 +8,7 @@ Every datetime crossing this boundary is Pydantic-validated as UTC-aware
 import zoneinfo
 from datetime import UTC, datetime, time, timedelta
 from enum import IntEnum, StrEnum
+from itertools import pairwise
 from typing import Annotated, Any
 
 from pydantic import (
@@ -16,7 +17,9 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ValidationInfo,
     field_validator,
+    model_validator,
 )
 
 
@@ -56,6 +59,24 @@ class LocalInterval(BaseModel):
     # decision explicitly tolerates end < start for overnight shifts (per
     # v1.0-DECISION-MAP.md Phase 2 [midnight-hours]). Do not add a same-day-only
     # validator in this phase; it would need reverting in Phase 2.
+    #
+    # WR-02: end == start IS rejected, though. `time.py::localize_operating_hours`
+    # treats any `end <= start` as the overnight sentinel and anchors `end` on
+    # the following calendar day — for `end == start` that silently produces a
+    # full 24-hour window, the most permissive possible outcome for a
+    # scheduling engine, which is almost never what a caller who wrote
+    # `start=end` (e.g. zeroing out a disabled day) actually intended. Fail
+    # loudly here instead of guessing.
+    @field_validator("end")
+    @classmethod
+    def _reject_zero_length(cls, v: time, info: ValidationInfo) -> time:
+        start = info.data.get("start")
+        if start is not None and v == start:
+            raise ValueError(
+                "LocalInterval.end must differ from start "
+                "(use disjoint start/end, or omit the weekday for 'no hours')"
+            )
+        return v
 
 
 class Resource(BaseModel):
@@ -86,6 +107,36 @@ class Resource(BaseModel):
         except zoneinfo.ZoneInfoNotFoundError as exc:
             raise ValueError(f"not a valid IANA timezone: {v!r}") from exc
         return v
+
+    @model_validator(mode="after")
+    def _reject_overlapping_intervals(self) -> "Resource":
+        # WR-01: two overlapping LocalIntervals declared for the same
+        # Weekday cause free_fragments to scan (and emit) the overlapping
+        # region twice, producing duplicate PublicSlots in the two-list
+        # contract. Reject at construction time instead.
+        for weekday, local_intervals in self.operating_hours.items():
+            ranges: list[tuple[int, int]] = []
+            for local_interval in local_intervals:
+                start_min = (
+                    local_interval.start.hour * 60 + local_interval.start.minute
+                )
+                end_min = local_interval.end.hour * 60 + local_interval.end.minute
+                # D-05 overnight sentinel (end < start, end == start already
+                # rejected by LocalInterval itself): anchor end on a
+                # "double day" timeline (minutes 1440-2880 == the following
+                # calendar day) so overlap comparisons below stay a plain
+                # half-open-interval check even across midnight.
+                if end_min < start_min:
+                    end_min += 24 * 60
+                ranges.append((start_min, end_min))
+            ranges.sort()
+            for (_, prev_end), (next_start, _) in pairwise(ranges):
+                if next_start < prev_end:
+                    raise ValueError(
+                        f"overlapping LocalIntervals declared for "
+                        f"{weekday.name}: intervals must not overlap"
+                    )
+        return self
 
 
 class SlotStatus(StrEnum):

@@ -80,6 +80,61 @@ def test_resource_buffer_cannot_be_negative() -> None:
         Resource(**kwargs)
 
 
+def test_local_interval_rejects_zero_length() -> None:
+    # WR-02: `start == end` used to be silently interpreted by
+    # `localize_operating_hours`'s `end <= start` overnight sentinel as a
+    # full 24-hour window — the most permissive possible outcome, and almost
+    # never what a caller who wrote start==end (e.g. zeroing out a disabled
+    # day) actually intended. Reject it loudly at construction time instead.
+    with pytest.raises(pydantic.ValidationError):
+        LocalInterval(start=time(9, 0), end=time(9, 0))
+
+
+def test_resource_rejects_overlapping_local_intervals_same_weekday() -> None:
+    # WR-01: two overlapping LocalIntervals declared for the same Weekday
+    # caused free_fragments to scan (and emit) the overlapping region
+    # twice, producing duplicate PublicSlots. Reject at construction time.
+    kwargs = _base_resource_kwargs()
+    kwargs["operating_hours"] = {
+        Weekday.MONDAY: [
+            LocalInterval(start=time(9, 0), end=time(12, 0)),
+            LocalInterval(start=time(11, 0), end=time(14, 0)),
+        ],
+    }
+    with pytest.raises(pydantic.ValidationError):
+        Resource(**kwargs)
+
+
+def test_resource_rejects_overlapping_overnight_local_intervals() -> None:
+    # WR-01, overnight case: two overnight (midnight-crossing) intervals
+    # declared for the same weekday that overlap each other on the shared
+    # night must also be rejected, not just same-day non-overnight pairs.
+    kwargs = _base_resource_kwargs()
+    kwargs["operating_hours"] = {
+        Weekday.MONDAY: [
+            LocalInterval(start=time(22, 0), end=time(2, 0)),
+            LocalInterval(start=time(23, 0), end=time(1, 0)),
+        ],
+    }
+    with pytest.raises(pydantic.ValidationError):
+        Resource(**kwargs)
+
+
+def test_resource_allows_adjacent_non_overlapping_local_intervals() -> None:
+    # WR-01 regression guard: adjacent (touching, non-overlapping)
+    # intervals — the exact split-shift shape D-03 exists to support — must
+    # continue to be accepted.
+    kwargs = _base_resource_kwargs()
+    kwargs["operating_hours"] = {
+        Weekday.MONDAY: [
+            LocalInterval(start=time(9, 0), end=time(12, 0)),
+            LocalInterval(start=time(12, 0), end=time(17, 0)),
+        ],
+    }
+    resource = Resource(**kwargs)
+    assert len(resource.operating_hours[Weekday.MONDAY]) == 2
+
+
 def _base_hold_kwargs() -> dict:
     """Minimal valid Hold kwargs, overridden per-test for the field under test."""
     now_utc = datetime(2026, 9, 3, 9, 0, tzinfo=UTC)
