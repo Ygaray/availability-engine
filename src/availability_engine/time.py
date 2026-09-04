@@ -3,9 +3,16 @@
 Confined here (alongside `contracts.py`'s boundary validator) so `core/` never
 needs to import `zoneinfo` directly (Architectural Responsibility Map rule).
 
-Phase 1 scope: same-day local-to-UTC combination only. Midnight-crossing
-(`LocalInterval.end < .start`) and DST edge cases are explicitly deferred to
-Phase 2 (GRID-02/GRID-03) — do not handle them here.
+Midnight-crossing (`LocalInterval.end <= .start`, D-05's tolerated overnight
+sentinel) is handled here: the interval's end is anchored on the following
+calendar day. DST transitions need no special-case code — converting each
+boundary point independently via `.astimezone(UTC)` before computing the
+elapsed span already yields the correct (compressed/expanded) UTC duration
+across a spring-forward gap or fall-back doubled hour (GRID-02, verified by
+`tests/core/test_grid_dst.py`). A boundary landing *inside* a DST transition
+resolves deterministically via Python's default `fold=0` (D-01: collapses
+forward through a spring-forward gap; picks the earlier occurrence in a
+fall-back doubled hour) — see `tests/test_time_boundary.py`.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -51,7 +58,16 @@ def localize_operating_hours(
             local_start = datetime.combine(
                 current_date, local_interval.start, tzinfo=tz
             )
-            local_end = datetime.combine(current_date, local_interval.end, tzinfo=tz)
+            # D-05: end <= start is the tolerated overnight sentinel — anchor
+            # the end boundary on the following calendar day rather than the
+            # start day. A LocalInterval spans at most one midnight-crossing;
+            # never current_date + 2.
+            interval_end_date = current_date
+            if local_interval.end <= local_interval.start:
+                interval_end_date = current_date + timedelta(days=1)
+            local_end = datetime.combine(
+                interval_end_date, local_interval.end, tzinfo=tz
+            )
             utc_interval = Interval(
                 start=local_start.astimezone(UTC),
                 end=local_end.astimezone(UTC),
