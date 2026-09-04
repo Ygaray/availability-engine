@@ -49,7 +49,7 @@ which codes contract-first against the stubbed structured output.
 - [x] **STORE-02**: An in-memory storage implementation ships as the reference/test backend
 - [x] **STORE-03**: One SQL storage implementation targets both SQLite (dev) and Postgres (prod), using the portable atomic conditional-write pattern (`BEGIN IMMEDIATE` on SQLite, `pg_advisory_xact_lock` transaction-scoped advisory lock on Postgres — Phase 4 research found bare `FOR UPDATE` insufficient against the phantom-insert race on not-yet-existing rows; see `.planning/phases/04-sql-backend-concurrency-proof/04-RESEARCH.md` and `04-01-PLAN.md`)
 - [x] **STORE-04**: The same parametrized contract test suite passes unmodified against in-memory, SQLite, and Postgres backends
-- [ ] **STORE-05**: The SQL schema is versioned with migrations from the first commit (initial migration = current schema)
+- [x] **STORE-05**: The SQL schema is versioned with migrations from the first commit (initial migration = current schema)
 
 ### Packaging & Contract (`PKG`)
 
@@ -110,7 +110,7 @@ Requirement → phase mapping. Phases defined in `.planning/ROADMAP.md`.
 | HOLD-07 | Phase 3 | Complete |
 | STORE-03 | Phase 4 | Complete |
 | STORE-04 | Phase 4 | Complete |
-| STORE-05 | Phase 4 | Pending |
+| STORE-05 | Phase 4 | Complete |
 | HOLD-02 | Phase 4 | Pending |
 | PKG-01 | Phase 5 | Pending |
 | PKG-02 | Phase 5 | Pending |
