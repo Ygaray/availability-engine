@@ -166,6 +166,20 @@ class InMemoryStore:
         idempotency_key: str | None = None,
     ) -> Booking:
         async with self._lock:
+            # HOLD-07: mirrors place_hold's idempotency pattern exactly, but
+            # this check must come BEFORE the `hold is None` lookup — a
+            # replay's underlying hold may have already been deleted by the
+            # first call's success (the exact scenario this replay exists to
+            # handle without raising a spurious HoldNotFoundError).
+            fp = None
+            if idempotency_key is not None:
+                fp = _fingerprint(hold_id, payload)
+                existing = self._idempotency.get(("confirm_hold", idempotency_key))
+                if existing is not None:
+                    if existing.fingerprint == fp:
+                        assert isinstance(existing.result, Booking)
+                        return existing.result
+                    raise IdempotencyConflictError("confirm_hold", idempotency_key)
             hold = self._holds.get(hold_id)
             if hold is None:
                 raise HoldNotFoundError(hold_id)
@@ -180,6 +194,11 @@ class InMemoryStore:
                 payload=payload if payload is not None else {},
             )
             self._bookings[booking.id] = booking
+            if idempotency_key is not None:
+                assert fp is not None
+                self._idempotency[("confirm_hold", idempotency_key)] = (
+                    IdempotencyRecord(fp, booking)
+                )
             return booking
 
     async def release_hold(self, hold_id: str) -> None:

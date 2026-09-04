@@ -469,3 +469,59 @@ async def test_place_hold_concurrent_same_key_race_returns_same_hold(
     )
     booked_slot = next(s for s in result_after.booked if s.start == slot.start)
     assert booked_slot.remaining == 0
+
+
+async def test_confirm_hold_idempotent_replay(sample_resource: Resource) -> None:
+    # HOLD-07: a same-key/same-(hold_id, payload) replay of confirm_hold
+    # returns the identical Booking without raising HoldNotFoundError, even
+    # though the underlying hold was already consumed and deleted by the
+    # first call's success.
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(sample_resource)
+
+    result = await engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
+    slot = result.available[0]
+    hold = await engine.place_hold(
+        sample_resource.id, slot.start, slot.end, ttl_seconds=60
+    )
+
+    payload = {"order_id": "replay-1"}
+    first = await engine.confirm_hold(hold.id, payload=payload, idempotency_key="c1")
+    second = await engine.confirm_hold(hold.id, payload=payload, idempotency_key="c1")
+
+    assert first.id == second.id
+
+
+async def test_idempotency_key_scoped_per_operation_type(
+    sample_resource: Resource,
+) -> None:
+    # D-01: the same literal idempotency key string used for an unrelated
+    # place_hold call and confirm_hold call never collides — each operation's
+    # idempotency record is scoped by (operation_type, key).
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(sample_resource)
+
+    result = await engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
+    first_slot = result.available[0]
+    second_slot = next(s for s in result.available if s.start != first_slot.start)
+
+    # Consume first_slot's hold via confirm_hold under the shared key.
+    hold_for_confirm = await engine.place_hold(
+        sample_resource.id, first_slot.start, first_slot.end, ttl_seconds=60
+    )
+    booking = await engine.confirm_hold(
+        hold_for_confirm.id, payload={"x": 1}, idempotency_key="shared-key"
+    )
+    assert booking.resource_id == sample_resource.id
+
+    # An unrelated place_hold on a different slot, using the exact same key
+    # string, must not collide with the confirm_hold record above and must
+    # return its own correctly-typed Hold.
+    hold = await engine.place_hold(
+        sample_resource.id,
+        second_slot.start,
+        second_slot.end,
+        ttl_seconds=60,
+        idempotency_key="shared-key",
+    )
+    assert hold.slot_start == second_slot.start

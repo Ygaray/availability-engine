@@ -165,3 +165,34 @@ class TestStorageContractSuite:
 
         with pytest.raises(BookingNotFoundError):
             await backend.cancel_booking(booking.id)
+
+    async def test_place_hold_idempotent_replay_at_storage_level(
+        self, backend_factory: type[InMemoryStore], sample_resource: Resource
+    ) -> None:
+        # HOLD-07/STORE-04: exercises idempotent place_hold directly against
+        # the storage backend (not the engine facade), so Phase 4's SQL
+        # backend addition is proven against identical behavior without
+        # rewriting this test body.
+        backend = backend_factory()
+        await backend.save_resource(sample_resource)
+        slot = Interval(
+            start=datetime(2026, 9, 7, 15, 0, tzinfo=UTC),
+            end=datetime(2026, 9, 7, 15, 30, tzinfo=UTC),
+        )
+
+        first = await backend.place_hold(
+            sample_resource.id,
+            slot,
+            capacity=sample_resource.capacity,
+            ttl_seconds=60,
+            idempotency_key="storage-k",
+        )
+        second = await backend.place_hold(
+            sample_resource.id,
+            slot,
+            capacity=sample_resource.capacity,
+            ttl_seconds=60,
+            idempotency_key="storage-k",
+        )
+
+        assert first.id == second.id

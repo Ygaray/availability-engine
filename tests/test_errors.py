@@ -18,6 +18,7 @@ _CONCRETE_EXCEPTION_CLASSES = [
     errors.HoldNotFoundError,
     errors.ResourceNotFoundError,
     errors.BookingNotFoundError,
+    errors.IdempotencyConflictError,
 ]
 
 
