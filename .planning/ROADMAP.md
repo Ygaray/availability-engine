@@ -64,15 +64,15 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. Rejections carry machine-readable reason codes (e.g. `capacity_exhausted`, `outside_hours`, `hold_expired`, `not_found`).
   5. The structured output contract is documented and frozen, with an automated conformance test the parallel consumer's stub can be checked against.
 
-**Plans**: 3 plans
+**Plans**: 3/3 plans executed
 **Wave 1**
 
-- [ ] 02-01-PLAN.md — Fix midnight-crossing time.py bug + DST fixture tests (GRID-02, GRID-03); pin tzdata/time-machine/hypothesis
+- [x] 02-01-PLAN.md — Fix midnight-crossing time.py bug + DST fixture tests (GRID-02, GRID-03); pin tzdata/time-machine/hypothesis
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 02-02-PLAN.md — Collapse duplicated active-entries scan into one shared expiry-filtering primitive (AVAIL-03, HOLD-05)
-- [ ] 02-03-PLAN.md — Capacity-shape contract restructure, reason codes, engine wiring, golden-file conformance (AVAIL-02, AVAIL-04, HOLD-08)
+- [x] 02-02-PLAN.md — Collapse duplicated active-entries scan into one shared expiry-filtering primitive (AVAIL-03, HOLD-05)
+- [x] 02-03-PLAN.md — Capacity-shape contract restructure, reason codes, engine wiring, golden-file conformance (AVAIL-02, AVAIL-04, HOLD-08)
 
 ### Phase 3: Idempotency & Cancellation
 
@@ -126,7 +126,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. End-to-End Walking Skeleton (In-Memory) | 3/3 | Complete    | 2026-09-03 |
-| 2. Capacity & Time Correctness | 0/3 | Not started | - |
+| 2. Capacity & Time Correctness | 3/3 | In Progress|  |
 | 3. Idempotency & Cancellation | 0/TBD | Not started | - |
 | 4. SQL Backend & Concurrency Proof | 0/TBD | Not started | - |
 | 5. Packaging, Docs & v1 Release | 0/TBD | Not started | - |
