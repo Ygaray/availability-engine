@@ -17,6 +17,7 @@ _CONCRETE_EXCEPTION_CLASSES = [
     errors.HoldExpiredError,
     errors.HoldNotFoundError,
     errors.ResourceNotFoundError,
+    errors.BookingNotFoundError,
 ]
 
 
@@ -30,3 +31,13 @@ def test_every_exception_has_reason_code() -> None:
         assert isinstance(reason_code, ReasonCode), (
             f"{exc_class.__name__}.reason_code is not a ReasonCode instance"
         )
+
+
+def test_new_error_names_importable_from_top_level_package() -> None:
+    # RESEARCH.md Pitfall 6: guards against the export-barrel omission —
+    # BookingStatus/BookingNotFoundError must be importable from the
+    # top-level availability_engine package, not just their submodules.
+    from availability_engine import BookingNotFoundError, BookingStatus
+
+    assert BookingNotFoundError is not None
+    assert BookingStatus is not None

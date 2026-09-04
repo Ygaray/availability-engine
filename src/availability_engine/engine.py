@@ -118,3 +118,6 @@ class AvailabilityEngine:
 
     async def release_hold(self, hold_id: str) -> None:
         await self._storage.release_hold(hold_id)
+
+    async def cancel_booking(self, booking_id: str) -> None:
+        await self._storage.cancel_booking(booking_id)

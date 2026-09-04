@@ -39,7 +39,7 @@ which codes contract-first against the stubbed structured output.
 - [x] **HOLD-03**: Consumer can confirm an active, unexpired hold into a Booking, attaching an opaque consumer payload that round-trips untouched
 - [x] **HOLD-04**: Consumer can explicitly release a hold, freeing its capacity immediately
 - [x] **HOLD-05**: Expired holds auto-release lazily — they stop counting against capacity on the next read or hold attempt, with no background sweeper
-- [ ] **HOLD-06**: Consumer can cancel a confirmed Booking, freeing its capacity
+- [x] **HOLD-06**: Consumer can cancel a confirmed Booking, freeing its capacity
 - [ ] **HOLD-07**: `place_hold` and `confirm` accept an optional idempotency key; a retry with the same key returns the original result instead of acting twice (enforced by a unique constraint / conditional write)
 - [x] **HOLD-08**: Rejections carry machine-readable reason codes (e.g. `capacity_exhausted`, `outside_hours`, `hold_expired`, `not_found`, `idempotency_conflict`)
 
@@ -106,7 +106,7 @@ Requirement → phase mapping. Phases defined in `.planning/ROADMAP.md`.
 | GRID-03 | Phase 2 | Complete |
 | HOLD-05 | Phase 2 | Complete |
 | HOLD-08 | Phase 2 | Complete |
-| HOLD-06 | Phase 3 | Pending |
+| HOLD-06 | Phase 3 | Complete |
 | HOLD-07 | Phase 3 | Pending |
 | STORE-03 | Phase 4 | Pending |
 | STORE-04 | Phase 4 | Pending |

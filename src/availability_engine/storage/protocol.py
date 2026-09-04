@@ -45,3 +45,10 @@ class StorageBackend(Protocol):
     async def release_hold(self, hold_id: str) -> None:
         """Idempotent explicit release."""
         ...
+
+    async def cancel_booking(self, booking_id: str) -> None:
+        """NOT idempotent, unlike release_hold's idempotent explicit release.
+        Raises BookingNotFoundError on an unknown or already-cancelled
+        booking_id (D-04) — cancellation of a booking that is not there to
+        cancel is always an error, never a silent no-op."""
+        ...
