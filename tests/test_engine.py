@@ -1,8 +1,8 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 
 import pytest
 
-from availability_engine.contracts import ReasonCode, Resource
+from availability_engine.contracts import LocalInterval, ReasonCode, Resource, Weekday
 from availability_engine.engine import AvailabilityEngine
 from availability_engine.errors import (
     CapacityExhaustedError,
@@ -213,3 +213,42 @@ async def test_place_hold_outside_hours(sample_resource: Resource) -> None:
         )
 
     assert exc_info.value.reason_code == ReasonCode.OUTSIDE_HOURS
+
+
+async def test_place_hold_succeeds_after_midnight_on_overnight_hours_resource() -> (
+    None
+):
+    # CR-01: a resource with an overnight (midnight-crossing) LocalInterval
+    # (Monday 22:00->06:00) must accept a hold for a slot that falls
+    # entirely after local midnight (e.g. Tuesday 05:30-06:00), because
+    # get_availability already reports that identical slot as available.
+    # Before the fix, place_hold called localize_operating_hours with the
+    # query window narrowed to the exact requested slot, whose calendar
+    # date is Tuesday — one day after the LocalInterval's MONDAY key — so
+    # `hours` came back empty and OutsideHoursError was incorrectly raised.
+    resource = Resource(
+        id="night-shift",
+        capacity=1,
+        operating_hours={
+            Weekday.MONDAY: [LocalInterval(start=time(22, 0), end=time(6, 0))],
+        },
+        buffer=timedelta(minutes=0),
+        timezone="America/Chicago",
+        slot_duration=timedelta(minutes=30),
+    )
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(resource)
+
+    # Window wide enough to include the overnight interval's after-midnight
+    # tail (Tue 05:30-06:00 CDT == 2026-09-08 10:30-11:00 UTC).
+    window_start = datetime(2026, 9, 7, 0, 0, tzinfo=UTC)
+    window_end = datetime(2026, 9, 9, 0, 0, tzinfo=UTC)
+
+    result = await engine.get_availability(resource.id, window_start, window_end)
+    slot = result.available[-1]  # 2026-09-08 10:30 UTC == Tue 05:30 CDT
+
+    hold = await engine.place_hold(
+        resource.id, slot.start, slot.end, ttl_seconds=60
+    )
+    assert hold.slot_start == slot.start
+    assert hold.slot_end == slot.end

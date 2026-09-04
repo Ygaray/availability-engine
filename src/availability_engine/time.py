@@ -49,7 +49,13 @@ def localize_operating_hours(
 
     query_window = Interval(start=start, end=end)
 
-    current_date = start.astimezone(tz).date()
+    # Look back one calendar day so an overnight interval anchored on the
+    # prior day (D-05: `end <= start` spills into `current_date + 1`) is
+    # always considered, even when the query window itself starts after
+    # local midnight (e.g. `place_hold`'s exact-slot window). `intersect()`
+    # below already discards anything that doesn't actually overlap the
+    # query window, so widening the lookback here is safe (CR-01).
+    current_date = start.astimezone(tz).date() - timedelta(days=1)
     end_date = end.astimezone(tz).date()
 
     while current_date <= end_date:
