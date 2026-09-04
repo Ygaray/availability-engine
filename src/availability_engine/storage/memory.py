@@ -37,36 +37,36 @@ class InMemoryStore:
     async def get_active_entries(
         self, resource_id: str, window: Interval
     ) -> list[Hold | Booking]:
+        # AVAIL-03/HOLD-05: this is the ONE shared, expiry-filtering
+        # active-entries primitive — every read and write path that needs to
+        # know what currently occupies capacity calls this, never a
+        # duplicate scan (the original Phase 1 gap was exactly two
+        # un-synchronized scans, neither of which checked expiry).
+        now = datetime.now(UTC)
         entries: list[Hold | Booking] = []
         for hold in self._holds.values():
             if hold.resource_id != resource_id:
+                continue
+            if hold.expires_at <= now:
+                # Active iff expires_at > now — the same predicate
+                # confirm_hold already uses correctly below. Lazy release:
+                # the expired Hold record stays in _holds (HOLD-05) until an
+                # explicit release_hold/confirm_hold call; it is simply
+                # excluded from counting as active on this and every
+                # subsequent read.
                 continue
             hold_interval = Interval(start=hold.slot_start, end=hold.slot_end)
             if overlaps(hold_interval, window):
                 entries.append(hold)
         for booking in self._bookings.values():
+            # Bookings have no expiry — cancellation is Phase 3's HOLD-06,
+            # out of scope here.
             if booking.resource_id != resource_id:
                 continue
             booking_interval = Interval(start=booking.slot_start, end=booking.slot_end)
             if overlaps(booking_interval, window):
                 entries.append(booking)
         return entries
-
-    def _count_active(self, resource_id: str, slot: Interval) -> int:
-        count = 0
-        for hold in self._holds.values():
-            if hold.resource_id != resource_id:
-                continue
-            hold_interval = Interval(start=hold.slot_start, end=hold.slot_end)
-            if overlaps(hold_interval, slot):
-                count += 1
-        for booking in self._bookings.values():
-            if booking.resource_id != resource_id:
-                continue
-            booking_interval = Interval(start=booking.slot_start, end=booking.slot_end)
-            if overlaps(booking_interval, slot):
-                count += 1
-        return count
 
     async def place_hold(
         self,
@@ -87,8 +87,15 @@ class InMemoryStore:
             # happen via the engine facade, which already validates it).
             resource = self._resources.get(resource_id)
             effective_capacity = resource.capacity if resource is not None else capacity
-            active = self._count_active(resource_id, slot)
-            if active >= effective_capacity:
+            # get_active_entries() performs zero real I/O (pure dict
+            # iteration, no internal suspension point) — awaiting it from
+            # inside this async with self._lock: block does not yield
+            # control back to the event loop, so it does not reopen the
+            # TOCTOU window the check-and-write pattern above guards
+            # against. Reusing the one shared primitive here (instead of a
+            # second, separate scan) is exactly what AVAIL-03 requires.
+            active = await self.get_active_entries(resource_id, slot)
+            if len(active) >= effective_capacity:
                 raise CapacityExhaustedError(resource_id, slot)
             hold = Hold(
                 id=str(uuid.uuid4()),
