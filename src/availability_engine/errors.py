@@ -77,6 +77,23 @@ class BookingNotFoundError(AvailabilityEngineError):
         super().__init__(f"booking {booking_id!r} not found")
 
 
+class IdempotencyConflictError(AvailabilityEngineError):
+    """Raised when an idempotency_key is reused with materially different
+    call arguments (place_hold) or payload (confirm_hold). Never stores the
+    conflicting arguments/payload itself (T-03-06) — only the opaque key and
+    operation_type, matching this module's no-payload-in-constructor rule."""
+
+    reason_code = ReasonCode.IDEMPOTENCY_CONFLICT
+
+    def __init__(self, operation_type: str, key: str) -> None:
+        self.operation_type = operation_type
+        self.key = key
+        super().__init__(
+            f"idempotency key {key!r} for operation {operation_type!r} "
+            "already used with different arguments"
+        )
+
+
 class ResourceNotFoundError(AvailabilityEngineError):
     """Raised when a resource_id does not refer to a defined Resource."""
 

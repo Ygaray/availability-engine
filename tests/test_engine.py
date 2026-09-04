@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, time, timedelta
 
 import pytest
@@ -8,6 +9,7 @@ from availability_engine.errors import (
     BookingNotFoundError,
     CapacityExhaustedError,
     HoldNotFoundError,
+    IdempotencyConflictError,
     OutsideHoursError,
     ResourceNotFoundError,
 )
@@ -369,3 +371,101 @@ async def test_get_availability_survives_capacity_reduction_below_active_count()
     )
     assert reduced_slot.remaining == 0
     assert reduced_slot.capacity == 1
+
+
+async def test_place_hold_idempotent_replay(sample_resource: Resource) -> None:
+    # HOLD-07: a same-key/same-args replay of place_hold on a capacity-1
+    # resource returns the identical Hold and never raises
+    # CapacityExhaustedError on the second call.
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(sample_resource)
+
+    result = await engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
+    slot = result.available[0]
+
+    first = await engine.place_hold(
+        sample_resource.id,
+        slot.start,
+        slot.end,
+        ttl_seconds=60,
+        idempotency_key="k1",
+    )
+    second = await engine.place_hold(
+        sample_resource.id,
+        slot.start,
+        slot.end,
+        ttl_seconds=60,
+        idempotency_key="k1",
+    )
+
+    assert first.id == second.id
+
+
+async def test_place_hold_idempotency_conflict(sample_resource: Resource) -> None:
+    # HOLD-07: same idempotency_key with a materially different slot_start
+    # raises IdempotencyConflictError rather than silently returning either
+    # a stale result or double-acting.
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(sample_resource)
+
+    result = await engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
+    first_slot = result.available[0]
+    second_slot = next(s for s in result.available if s.start != first_slot.start)
+
+    await engine.place_hold(
+        sample_resource.id,
+        first_slot.start,
+        first_slot.end,
+        ttl_seconds=60,
+        idempotency_key="k2",
+    )
+
+    with pytest.raises(IdempotencyConflictError) as exc_info:
+        await engine.place_hold(
+            sample_resource.id,
+            second_slot.start,
+            second_slot.end,
+            ttl_seconds=60,
+            idempotency_key="k2",
+        )
+
+    assert exc_info.value.reason_code == ReasonCode.IDEMPOTENCY_CONFLICT
+
+
+async def test_place_hold_concurrent_same_key_race_returns_same_hold(
+    sample_resource: Resource,
+) -> None:
+    # HOLD-07: two concurrent place_hold calls sharing the same
+    # idempotency_key and identical args, issued via asyncio.gather, are
+    # serialized by InMemoryStore's single asyncio.Lock — both resolve to
+    # the same Hold.id and capacity is never double-consumed.
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(sample_resource)
+
+    result = await engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
+    slot = result.available[0]
+
+    first, second = await asyncio.gather(
+        engine.place_hold(
+            sample_resource.id,
+            slot.start,
+            slot.end,
+            ttl_seconds=60,
+            idempotency_key="race-key",
+        ),
+        engine.place_hold(
+            sample_resource.id,
+            slot.start,
+            slot.end,
+            ttl_seconds=60,
+            idempotency_key="race-key",
+        ),
+    )
+
+    assert first.id == second.id
+
+    result_after = await engine.get_availability(
+        sample_resource.id, WINDOW_START, WINDOW_END
+    )
+    booked_slot = next(s for s in result_after.booked if s.start == slot.start)
+    assert booked_slot.remaining == 0

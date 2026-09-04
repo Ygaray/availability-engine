@@ -7,6 +7,8 @@ TOCTOU window (Pitfall 1) even though asyncio is single-threaded.
 """
 
 import asyncio
+import hashlib
+import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -19,7 +21,23 @@ from availability_engine.errors import (
     CapacityExhaustedError,
     HoldExpiredError,
     HoldNotFoundError,
+    IdempotencyConflictError,
 )
+
+
+def _fingerprint(*parts: object) -> str:
+    """Deterministic fingerprint of the call arguments an idempotency key is
+    scoped against. `json.dumps(..., sort_keys=True, default=str)` handles
+    non-JSON-native parts (e.g. `datetime`) via `str()` deterministically."""
+    return hashlib.sha256(
+        json.dumps(parts, sort_keys=True, default=str).encode()
+    ).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class IdempotencyRecord:
+    fingerprint: str
+    result: Hold | Booking
 
 
 @dataclass
@@ -28,6 +46,9 @@ class InMemoryStore:
     _holds: dict[str, Hold] = field(default_factory=dict)
     _bookings: dict[str, Booking] = field(default_factory=dict)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    _idempotency: dict[tuple[str, str], IdempotencyRecord] = field(
+        default_factory=dict
+    )
 
     async def save_resource(self, resource: Resource) -> None:
         self._resources[resource.id] = resource
@@ -85,6 +106,22 @@ class InMemoryStore:
         idempotency_key: str | None = None,
     ) -> Hold:
         async with self._lock:
+            # HOLD-07 (D-01/D-02): idempotency check happens first, inside
+            # the same critical section as the capacity check/write below —
+            # no intervening `await` performs real I/O between the check and
+            # the eventual store, closing the TOCTOU window (Pitfall 1).
+            # `ttl_seconds` is deliberately EXCLUDED from the fingerprint
+            # (Open Question 1) — a legitimate retry may resend a different
+            # remaining-timeout budget for the same logical request.
+            fp = None
+            if idempotency_key is not None:
+                fp = _fingerprint(resource_id, slot.start, slot.end)
+                existing = self._idempotency.get(("place_hold", idempotency_key))
+                if existing is not None:
+                    if existing.fingerprint == fp:
+                        assert isinstance(existing.result, Hold)
+                        return existing.result
+                    raise IdempotencyConflictError("place_hold", idempotency_key)
             # WR-03: re-read the authoritative capacity from our own store
             # under the lock rather than trusting the caller-supplied
             # snapshot — closes the race where a concurrent
@@ -103,6 +140,9 @@ class InMemoryStore:
             # second, separate scan) is exactly what AVAIL-03 requires.
             active = await self.get_active_entries(resource_id, slot)
             if len(active) >= effective_capacity:
+                # Never cache an IdempotencyRecord on this failure path
+                # (Pitfall 2/T-03-07) — a retry with the same key, after
+                # capacity frees up, must be free to succeed.
                 raise CapacityExhaustedError(resource_id, slot)
             hold = Hold(
                 id=str(uuid.uuid4()),
@@ -112,6 +152,11 @@ class InMemoryStore:
                 expires_at=datetime.now(UTC) + timedelta(seconds=ttl_seconds),
             )
             self._holds[hold.id] = hold
+            if idempotency_key is not None:
+                assert fp is not None
+                self._idempotency[("place_hold", idempotency_key)] = IdempotencyRecord(
+                    fp, hold
+                )
             return hold
 
     async def confirm_hold(
