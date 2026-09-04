@@ -150,6 +150,29 @@ async def test_unknown_resource_raises_consistently() -> None:
         )
 
 
+async def test_get_availability_rejects_naive_datetime(
+    sample_resource: Resource,
+) -> None:
+    # GRID-04 / Success Criterion #5: get_availability's UtcDatetime
+    # annotation has no runtime enforcement of its own on a plain async
+    # method — it must actively guard the boundary (via time.require_utc)
+    # rather than rely on an accidental downstream Pydantic construction.
+    # This mirrors place_hold's naive-datetime rejection, but exercises the
+    # get_availability facade call path directly (not just a Pydantic model
+    # field in isolation).
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(sample_resource)
+
+    naive_start = datetime(2026, 9, 7)
+    naive_end = datetime(2026, 9, 8)
+
+    with pytest.raises(ValueError, match="UTC-aware"):
+        await engine.get_availability(sample_resource.id, naive_start, WINDOW_END)
+
+    with pytest.raises(ValueError, match="UTC-aware"):
+        await engine.get_availability(sample_resource.id, WINDOW_START, naive_end)
+
+
 async def test_release_hold_frees_capacity(sample_resource: Resource) -> None:
     engine = AvailabilityEngine(InMemoryStore())
     await engine.define_resource(sample_resource)

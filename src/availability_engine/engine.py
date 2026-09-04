@@ -34,6 +34,13 @@ class AvailabilityEngine:
     async def get_availability(
         self, resource_id: str, start: UtcDatetime, end: UtcDatetime
     ) -> AvailabilityResult:
+        # GRID-04 / Success Criterion #5: UtcDatetime is a bare annotation on
+        # this plain (non-Pydantic-wrapped) method with zero runtime
+        # enforcement — explicitly guard the boundary here rather than rely
+        # on an accidental downstream Pydantic construction (see place_hold).
+        time_boundary.require_utc(start)
+        time_boundary.require_utc(end)
+
         resource = await self._storage.get_resource(resource_id)
         if resource is None:
             # WR-02: match place_hold's unknown-resource handling — both
