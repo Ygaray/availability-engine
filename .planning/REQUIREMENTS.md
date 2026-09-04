@@ -21,8 +21,8 @@ which codes contract-first against the stubbed structured output.
 ### Time & Slot Grid (`GRID`)
 
 - [x] **GRID-01**: Engine generates a fixed-duration slot grid for a Resource from its operating hours + slot length + buffer
-- [ ] **GRID-02**: Grid generation is correct across DST transitions — spring-forward gaps and fall-back ambiguity produce no missing, duplicated, or hour-shifted slots (fixture-tested on real transition dates)
-- [ ] **GRID-03**: Engine handles operating hours that cross midnight without truncating or double-counting slots
+- [x] **GRID-02**: Grid generation is correct across DST transitions — spring-forward gaps and fall-back ambiguity produce no missing, duplicated, or hour-shifted slots (fixture-tested on real transition dates)
+- [x] **GRID-03**: Engine handles operating hours that cross midnight without truncating or double-counting slots
 - [x] **GRID-04**: All engine inputs/outputs at the public boundary are UTC-aware datetimes; the engine rejects naive datetimes; timezone conversion happens only at the facade edge
 
 ### Availability Query (`AVAIL`)
@@ -102,8 +102,8 @@ Requirement → phase mapping. Phases defined in `.planning/ROADMAP.md`.
 | AVAIL-02 | Phase 2 | Pending |
 | AVAIL-03 | Phase 2 | Pending |
 | AVAIL-04 | Phase 2 | Pending |
-| GRID-02 | Phase 2 | Pending |
-| GRID-03 | Phase 2 | Pending |
+| GRID-02 | Phase 2 | Complete |
+| GRID-03 | Phase 2 | Complete |
 | HOLD-05 | Phase 2 | Pending |
 | HOLD-08 | Phase 2 | Pending |
 | HOLD-06 | Phase 3 | Pending |
