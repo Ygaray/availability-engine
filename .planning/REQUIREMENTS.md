@@ -47,7 +47,7 @@ which codes contract-first against the stubbed structured output.
 
 - [x] **STORE-01**: Engine defines a coarse-grained async storage protocol whose methods are each exactly one atomic operation; the engine is written against the protocol, never a concrete backend
 - [x] **STORE-02**: An in-memory storage implementation ships as the reference/test backend
-- [ ] **STORE-03**: One SQL storage implementation targets both SQLite (dev) and Postgres (prod), using the portable atomic conditional-write pattern (`BEGIN IMMEDIATE` on SQLite, `FOR UPDATE` / row locks on Postgres)
+- [ ] **STORE-03**: One SQL storage implementation targets both SQLite (dev) and Postgres (prod), using the portable atomic conditional-write pattern (`BEGIN IMMEDIATE` on SQLite, `pg_advisory_xact_lock` transaction-scoped advisory lock on Postgres — Phase 4 research found bare `FOR UPDATE` insufficient against the phantom-insert race on not-yet-existing rows; see `.planning/phases/04-sql-backend-concurrency-proof/04-RESEARCH.md` and `04-01-PLAN.md`)
 - [ ] **STORE-04**: The same parametrized contract test suite passes unmodified against in-memory, SQLite, and Postgres backends
 - [ ] **STORE-05**: The SQL schema is versioned with migrations from the first commit (initial migration = current schema)
 

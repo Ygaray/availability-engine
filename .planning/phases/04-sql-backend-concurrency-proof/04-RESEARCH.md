@@ -520,9 +520,9 @@ async def test_concurrent_place_hold_never_exceeds_capacity(pg_container, sample
 | A2 | Alembic `1.19.1` (one version behind the same-day `1.19.2`) is the safer pin | Package Legitimacy Audit | If `1.19.2` in fact contains an important fix, pinning `1.19.1` could miss it — low risk either way since Alembic is a mature, slow-moving tool; the planner should do a 30-second changelog check at execution time rather than trust this guess blindly. |
 | A3 | The exact table/column names in the "Code Examples" migration (`holds`, `bookings`, `idempotency`, columns `id`/`resource_id`/`slot_start`/`slot_end`/`expires_at`/`status`) follow directly from the in-memory model's field names `[VERIFIED: src/availability_engine/contracts.py:188-204]` for `Hold`/`Booking`, but the exact SQL column types/nullability/index shape are this researcher's reasonable inference, not something CONTEXT.md or the codebase pins today | Code Examples | Low risk — CONTEXT.md's Claude's Discretion explicitly leaves "exact SQLAlchemy Core query construction" open; the planner has full latitude here as long as the Runtime Decisions' table split and the `(resource_id, slot_start, status)`-equivalent index are honored. |
 
-## Open Questions
+## Open Questions (RESOLVED — see 04-01-PLAN.md)
 
-1. **Should the advisory-lock finding be treated as overriding D-01, or as a new decision the human should confirm?**
+1. **Should the advisory-lock finding be treated as overriding D-01, or as a new decision the human should confirm?** _(RESOLVED: orchestrator ruling adopted the advisory-lock fix as an in-scope technical correction under CONTEXT.md's "Claude's Discretion" grant — D-01 was `source: ai-auto`, not human-approved, and the fix preserves schema/isolation-level. Documented as a superseding decision in 04-01-PLAN.md's objective, with HOLD-02 (04-04-PLAN.md) as the empirical proof.)_
    - What we know: D-01 ("defer FOR UPDATE, conditional write is sufficient") is factually incorrect
      for this schema under genuine Postgres concurrency, per the CITED phantom-insert sources this
      session. The Runtime Decisions section's restated "Postgres SELECT ... FOR UPDATE" is also
