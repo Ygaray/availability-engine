@@ -15,12 +15,13 @@ from availability_engine.core.intervals import Interval
 from availability_engine.errors import (
     BookingNotFoundError,
     CapacityExhaustedError,
+    HoldNotFoundError,
     IdempotencyConflictError,
 )
 from availability_engine.storage.memory import InMemoryStore
 
 
-@pytest.mark.parametrize("backend_factory", [InMemoryStore], ids=["in-memory"])
+@pytest.mark.parametrize("backend_factory", ["in-memory", "sqlite"], indirect=True)
 class TestStorageContractSuite:
     """Behavior every StorageBackend implementation must satisfy."""
 
@@ -439,7 +440,15 @@ class TestStorageContractSuite:
             hold.id, payload={}, idempotency_key="deleted-hold-k"
         )
 
-        assert hold.id not in backend._holds
+        # 04-01-PLAN.md Task 2: disclosed, minimal cross-backend portability
+        # fix — the original assertion here reached into
+        # InMemoryStore._holds, a private attribute that structurally
+        # cannot exist on SQLStore. A fresh, non-replay confirm_hold call
+        # (no idempotency_key) on the same hold_id proves the same fact
+        # (the underlying hold row is genuinely gone) without touching a
+        # private attribute: it must raise HoldNotFoundError.
+        with pytest.raises(HoldNotFoundError):
+            await backend.confirm_hold(hold.id, payload={})
 
         second = await backend.confirm_hold(
             hold.id, payload={}, idempotency_key="deleted-hold-k"
