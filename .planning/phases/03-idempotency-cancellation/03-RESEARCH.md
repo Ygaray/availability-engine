@@ -375,17 +375,19 @@ Not applicable in the traditional sense (no external library/API version drift t
 
 **If this table is empty:** N/A — see entries above. All locked decisions (D-01 through D-04) are implemented as specified; the assumptions above are exclusively in the discretionary space CONTEXT.md explicitly left open, plus one full-file-open shape (`Booking.status`) that D-04 describes conceptually but does not pin to an exact field.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should `ttl_seconds` be part of `place_hold`'s idempotency fingerprint?**
    - What we know: D-02 says a "materially-different-args replay" surfaces a conflict; `ttl_seconds` is technically a call argument.
    - What's unclear: whether a caller's retry is expected to resend the exact same `ttl_seconds` value, or whether TTL is considered "not semantically material" (since the resulting `Hold.expires_at` is server-computed from `now() + ttl_seconds` at call time anyway, and a replay returns the *original* `Hold` regardless).
    - Recommendation: Exclude `ttl_seconds` from the fingerprint unless the planner/discuss-phase decides otherwise — it's the one field most likely to legitimately differ between a caller's initial attempt and its retry (e.g. a client library that recomputes a "remaining timeout budget" per attempt), and excluding it doesn't weaken conflict detection on the fields that actually identify *which slot* is being held (`resource_id`, `slot_start`, `slot_end`).
+   - **RESOLVED:** 03-02-PLAN.md's Task 1 follows this recommendation literally — the `place_hold` fingerprint excludes `ttl_seconds`, covering only `(resource_id, slot_start, slot_end)`.
 
 2. **Exact `Booking` cancellation field shape — `status` enum vs. `cancelled_at` sentinel.**
    - What we know: D-04 says "modeled as a terminal `cancelled` status"; both a `BookingStatus` enum and a nullable `cancelled_at` timestamp satisfy this literally.
    - What's unclear: which one CONTEXT.md's author actually had in mind — the wording favors "status" but the codebase's other precedent (`Hold.expires_at`) favors the sentinel-timestamp idiom.
    - Recommendation: This research's worked examples use the `BookingStatus` enum (see Assumptions Log A1) for concreteness, but flag this explicitly for the planner to confirm or override before committing to `contracts.py` changes — it is the one true "new public contract shape" decision this phase makes that CONTEXT.md doesn't pin down exactly.
+   - **RESOLVED:** 03-01-PLAN.md's Task 1 adopts the `BookingStatus` enum (`CONFIRMED`/`CANCELLED`, default `CONFIRMED`) on `Booking`, matching Assumption A1's recommendation.
 
 ## Validation Architecture
 
