@@ -5,6 +5,7 @@ import pytest
 from availability_engine.contracts import LocalInterval, ReasonCode, Resource, Weekday
 from availability_engine.engine import AvailabilityEngine
 from availability_engine.errors import (
+    BookingNotFoundError,
     CapacityExhaustedError,
     HoldNotFoundError,
     OutsideHoursError,
@@ -222,6 +223,50 @@ async def test_cancel_booking_frees_capacity(sample_resource: Resource) -> None:
         sample_resource.id, slot.start, slot.end, ttl_seconds=60
     )
     assert new_hold.slot_start == slot.start
+
+
+async def test_cancel_booking_not_found_or_already_cancelled(
+    sample_resource: Resource,
+) -> None:
+    # D-04: an unknown booking_id, and a booking_id already cancelled, both
+    # raise BookingNotFoundError — never a silent no-op, unlike release_hold.
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(sample_resource)
+
+    with pytest.raises(BookingNotFoundError) as unknown_exc_info:
+        await engine.cancel_booking("does-not-exist")
+    assert unknown_exc_info.value.reason_code == ReasonCode.NOT_FOUND
+
+    result = await engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
+    slot = result.available[0]
+    hold = await engine.place_hold(
+        sample_resource.id, slot.start, slot.end, ttl_seconds=60
+    )
+    booking = await engine.confirm_hold(hold.id, payload={})
+    await engine.cancel_booking(booking.id)
+
+    with pytest.raises(BookingNotFoundError) as already_cancelled_exc_info:
+        await engine.cancel_booking(booking.id)
+    assert already_cancelled_exc_info.value.reason_code == ReasonCode.NOT_FOUND
+
+
+async def test_cancel_booking_on_hold_id_raises_not_found(
+    sample_resource: Resource,
+) -> None:
+    # HOLD-06 edge probe: cancel_booking looks up only _bookings, so an
+    # active Hold's id (never confirmed into a Booking) must never be
+    # accepted — the Hold/Booking id namespaces are never conflated.
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(sample_resource)
+
+    result = await engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
+    slot = result.available[0]
+    hold = await engine.place_hold(
+        sample_resource.id, slot.start, slot.end, ttl_seconds=60
+    )
+
+    with pytest.raises(BookingNotFoundError):
+        await engine.cancel_booking(hold.id)
 
 
 async def test_place_hold_outside_hours(sample_resource: Resource) -> None:

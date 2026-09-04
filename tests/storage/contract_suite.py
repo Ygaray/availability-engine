@@ -12,7 +12,7 @@ import time_machine
 
 from availability_engine.contracts import Resource
 from availability_engine.core.intervals import Interval
-from availability_engine.errors import CapacityExhaustedError
+from availability_engine.errors import BookingNotFoundError, CapacityExhaustedError
 from availability_engine.storage.memory import InMemoryStore
 
 
@@ -118,3 +118,50 @@ class TestStorageContractSuite:
         entries = await backend.get_active_entries(sample_resource.id, slot)
 
         assert entries == []
+
+    async def test_cancel_booking_frees_capacity_at_storage_level(
+        self, backend_factory: type[InMemoryStore], sample_resource: Resource
+    ) -> None:
+        # HOLD-06 at the storage-protocol level (STORE-04): proves Phase 4's
+        # future SQL backend is exercised against identical behavior without
+        # rewriting this suite.
+        backend = backend_factory()
+        await backend.save_resource(sample_resource)
+        slot = Interval(
+            start=datetime(2026, 9, 7, 15, 0, tzinfo=UTC),
+            end=datetime(2026, 9, 7, 15, 30, tzinfo=UTC),
+        )
+
+        hold = await backend.place_hold(
+            sample_resource.id, slot, capacity=sample_resource.capacity, ttl_seconds=60
+        )
+        booking = await backend.confirm_hold(hold.id, payload={})
+        await backend.cancel_booking(booking.id)
+
+        entries = await backend.get_active_entries(sample_resource.id, slot)
+
+        assert booking not in entries
+
+    async def test_cancel_booking_unknown_or_already_cancelled_raises(
+        self, backend_factory: type[InMemoryStore], sample_resource: Resource
+    ) -> None:
+        # D-04 at the storage-protocol level: an unknown or already-cancelled
+        # booking_id must be rejected, never a silent no-op.
+        backend = backend_factory()
+        await backend.save_resource(sample_resource)
+        slot = Interval(
+            start=datetime(2026, 9, 7, 15, 0, tzinfo=UTC),
+            end=datetime(2026, 9, 7, 15, 30, tzinfo=UTC),
+        )
+
+        with pytest.raises(BookingNotFoundError):
+            await backend.cancel_booking("does-not-exist")
+
+        hold = await backend.place_hold(
+            sample_resource.id, slot, capacity=sample_resource.capacity, ttl_seconds=60
+        )
+        booking = await backend.confirm_hold(hold.id, payload={})
+        await backend.cancel_booking(booking.id)
+
+        with pytest.raises(BookingNotFoundError):
+            await backend.cancel_booking(booking.id)
