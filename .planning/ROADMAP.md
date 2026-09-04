@@ -24,7 +24,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: End-to-End Walking Skeleton (In-Memory)** - Importable engine that defines a resource, generates a grid, answers availability, and places/confirms/releases a hold end to end (completed 2026-09-03)
 - [x] **Phase 2: Capacity & Time Correctness** - Capacity-aware (≥1) availability, DST/midnight-crossing correctness, lazy expiry, reason codes, and a frozen documented contract (completed 2026-09-04)
-- [ ] **Phase 3: Idempotency & Cancellation** - Retry-safe hold/confirm via idempotency keys and cancellation of confirmed bookings
+- [x] **Phase 3: Idempotency & Cancellation** - Retry-safe hold/confirm via idempotency keys and cancellation of confirmed bookings (completed 2026-09-04)
 - [ ] **Phase 4: SQL Backend & Concurrency Proof** - Real SQLite+Postgres backend swaps in beneath the engine, with a testcontainers-Postgres proof that concurrent holds never overbook
 - [ ] **Phase 5: Packaging, Docs & v1 Release** - Packaged, documented, and cut as a v1 git tag the first consumer can repin to
 
@@ -134,7 +134,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. End-to-End Walking Skeleton (In-Memory) | 3/3 | Complete    | 2026-09-03 |
 | 2. Capacity & Time Correctness | 3/3 | Complete    | 2026-09-04 |
-| 3. Idempotency & Cancellation | 2/2 | In Progress|  |
+| 3. Idempotency & Cancellation | 2/2 | Complete    | 2026-09-04 |
 | 4. SQL Backend & Concurrency Proof | 0/TBD | Not started | - |
 | 5. Packaging, Docs & v1 Release | 0/TBD | Not started | - |
 </content>
