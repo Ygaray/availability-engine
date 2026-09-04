@@ -86,14 +86,14 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. A retried call that races the original never double-spends capacity; a genuinely conflicting key surfaces an `idempotency_conflict` reason code.
   3. A caller can cancel a confirmed booking, and its capacity is freed immediately — the freed slot reappears on the next availability read.
 
-**Plans**: 0/2 plans executed
+**Plans**: 2/2 plans executed
 **Wave 1**
 
-- [ ] 03-01-PLAN.md — End-to-end cancel_booking: BookingStatus/Booking.status, BookingNotFoundError, cancel_booking on Protocol/InMemoryStore/facade, get_active_entries CANCELLED filter (HOLD-06)
+- [x] 03-01-PLAN.md — End-to-end cancel_booking: BookingStatus/Booking.status, BookingNotFoundError, cancel_booking on Protocol/InMemoryStore/facade, get_active_entries CANCELLED filter (HOLD-06)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 03-02-PLAN.md — Idempotent place_hold/confirm_hold: IdempotencyConflictError, fingerprinted lock-guarded replay/conflict detection, concurrent-race safety (HOLD-07)
+- [x] 03-02-PLAN.md — Idempotent place_hold/confirm_hold: IdempotencyConflictError, fingerprinted lock-guarded replay/conflict detection, concurrent-race safety (HOLD-07)
 
 ### Phase 4: SQL Backend & Concurrency Proof
 
@@ -134,7 +134,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. End-to-End Walking Skeleton (In-Memory) | 3/3 | Complete    | 2026-09-03 |
 | 2. Capacity & Time Correctness | 3/3 | Complete    | 2026-09-04 |
-| 3. Idempotency & Cancellation | 0/2 | Not started | - |
+| 3. Idempotency & Cancellation | 2/2 | In Progress|  |
 | 4. SQL Backend & Concurrency Proof | 0/TBD | Not started | - |
 | 5. Packaging, Docs & v1 Release | 0/TBD | Not started | - |
 </content>
