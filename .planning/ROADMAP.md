@@ -22,7 +22,7 @@ protocol.
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: End-to-End Walking Skeleton (In-Memory)** - Importable engine that defines a resource, generates a grid, answers availability, and places/confirms/releases a hold end to end
+- [x] **Phase 1: End-to-End Walking Skeleton (In-Memory)** - Importable engine that defines a resource, generates a grid, answers availability, and places/confirms/releases a hold end to end (completed 2026-09-03)
 - [ ] **Phase 2: Capacity & Time Correctness** - Capacity-aware (≥1) availability, DST/midnight-crossing correctness, lazy expiry, reason codes, and a frozen documented contract
 - [ ] **Phase 3: Idempotency & Cancellation** - Retry-safe hold/confirm via idempotency keys and cancellation of confirmed bookings
 - [ ] **Phase 4: SQL Backend & Concurrency Proof** - Real SQLite+Postgres backend swaps in beneath the engine, with a testcontainers-Postgres proof that concurrent holds never overbook
@@ -46,9 +46,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Plans**: 0/3 plans executed
 
-- [ ] 01-01-PLAN.md
-- [ ] 01-02-PLAN.md
-- [ ] 01-03-PLAN.md
+- [x] 01-01-PLAN.md
+- [x] 01-02-PLAN.md
+- [x] 01-03-PLAN.md
 
 ### Phase 2: Capacity & Time Correctness
 
@@ -117,7 +117,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. End-to-End Walking Skeleton (In-Memory) | 0/3 | Planned    |  |
+| 1. End-to-End Walking Skeleton (In-Memory) | 3/3 | Complete    | 2026-09-03 |
 | 2. Capacity & Time Correctness | 0/TBD | Not started | - |
 | 3. Idempotency & Cancellation | 0/TBD | Not started | - |
 | 4. SQL Backend & Concurrency Proof | 0/TBD | Not started | - |
