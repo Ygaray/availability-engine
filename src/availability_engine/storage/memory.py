@@ -119,7 +119,15 @@ class InMemoryStore:
                 existing = self._idempotency.get(("place_hold", idempotency_key))
                 if existing is not None:
                     if existing.fingerprint == fp:
-                        assert isinstance(existing.result, Hold)
+                        # IN-02: explicit check (not `assert`) so this
+                        # type-narrowing guard survives `python -O`, in case
+                        # the (operation_type, key) scoping invariant that
+                        # currently prevents cross-type collisions is ever
+                        # weakened.
+                        if not isinstance(existing.result, Hold):
+                            raise TypeError(
+                                "place_hold idempotency record does not reference a Hold"
+                            )
                         return existing.result
                     raise IdempotencyConflictError("place_hold", idempotency_key)
             # WR-03: re-read the authoritative capacity from our own store
@@ -177,7 +185,13 @@ class InMemoryStore:
                 existing = self._idempotency.get(("confirm_hold", idempotency_key))
                 if existing is not None:
                     if existing.fingerprint == fp:
-                        assert isinstance(existing.result, Booking)
+                        # IN-02: explicit check (not `assert`) so this
+                        # type-narrowing guard survives `python -O`.
+                        if not isinstance(existing.result, Booking):
+                            raise TypeError(
+                                "confirm_hold idempotency record does not "
+                                "reference a Booking"
+                            )
                         return existing.result
                     raise IdempotencyConflictError("confirm_hold", idempotency_key)
             hold = self._holds.get(hold_id)
