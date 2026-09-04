@@ -130,7 +130,15 @@ Plans:
   3. An example integration fulfills the consumer's stub and passes the contract conformance test end to end.
   4. v1.0 is cut as a git tag / release the first consumer can repin to.
 
-**Plans**: TBD
+**Plans**: 5 plans
+
+Plans:
+
+- [ ] 05-01-PLAN.md — Fix confirmed packaging bug: force-include Alembic migrations + py.typed marker, proven by a real build+install+migrate round trip (PKG-01, D-05)
+- [ ] 05-02-PLAN.md — Sync facade: background-thread event-loop bridge over AvailabilityEngine, proven safe from inside a running event loop (PKG-01, D-04)
+- [ ] 05-03-PLAN.md — Example AvailabilityPort adapter + cross-repo AvailabilityContractSuite conformance proof (PKG-03, D-02, D-03)
+- [ ] 05-04-PLAN.md — README.md documenting the frozen contract as the stable product surface, with an automated doc-example regression test (PKG-02)
+- [ ] 05-05-PLAN.md — Cut and push the v0.1.0 release tag, gated on full-suite-green (PKG-03, D-01)
 
 ## Progress
 
