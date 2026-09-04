@@ -105,6 +105,10 @@ class InMemoryStore:
         payload: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Hold:
+        # WR-04: `payload` is currently a no-op here — it is accepted (to
+        # match the StorageBackend Protocol's reserved-kwarg signature) but
+        # never attached to the resulting Hold or carried through to the
+        # eventual Booking. Only confirm_hold's `payload` is actually stored.
         async with self._lock:
             # HOLD-07 (D-01/D-02): idempotency check happens first, inside
             # the same critical section as the capacity check/write below —
