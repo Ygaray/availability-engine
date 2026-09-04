@@ -21,9 +21,23 @@ from availability_engine.errors import (
 from availability_engine.storage.memory import InMemoryStore
 
 
-@pytest.mark.parametrize("backend_factory", ["in-memory", "sqlite"], indirect=True)
+@pytest.mark.parametrize(
+    "backend_factory", ["in-memory", "sqlite", "postgres"], indirect=True
+)
 class TestStorageContractSuite:
     """Behavior every StorageBackend implementation must satisfy."""
+
+    # 04-02-PLAN.md Task 1: pg_engine/sqlite_engine are session-scoped async
+    # fixtures (loop_scope="session"), but each test function otherwise gets
+    # its own event loop by default (asyncio_default_fixture_loop_scope is
+    # unset, defaulting to "function"). asyncpg's connections are bound to
+    # the event loop that created them and raise "attached to a different
+    # loop" if a later test's own loop differs from the session-scoped
+    # engine's loop — so every test in this class must also run on the
+    # session-scoped loop. aiosqlite tolerates cross-loop reuse (it re-reads
+    # the current running loop on every call rather than binding once), so
+    # this was never a visible problem before Postgres was added.
+    pytestmark = pytest.mark.asyncio(loop_scope="session")
 
     async def test_save_and_get_resource_roundtrip(
         self, backend_factory: type[InMemoryStore], sample_resource: Resource
