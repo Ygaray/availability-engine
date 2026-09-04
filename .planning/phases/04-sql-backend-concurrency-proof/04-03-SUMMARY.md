@@ -209,3 +209,14 @@ None — Docker was already running and reachable (`docker info` exit 0) for Tas
 ---
 *Phase: 04-sql-backend-concurrency-proof*
 *Completed: 2026-09-04*
+
+## Self-Check: PASSED
+
+All created files verified present on disk:
+- `alembic.ini`, `alembic/env.py`, `alembic/script.py.mako`,
+  `alembic/versions/0001_initial_schema.py`, `tests/test_migrations.py`,
+  `tests/test_aiosqlite_loop_responsiveness.py`,
+  `.planning/phases/04-sql-backend-concurrency-proof/04-03-SUMMARY.md`
+
+All task commits verified present in `git log --oneline --all`:
+- `2ef3996`, `1d075ea`, `abfc152`, `ab210ef`
