@@ -252,3 +252,47 @@ async def test_place_hold_succeeds_after_midnight_on_overnight_hours_resource() 
     )
     assert hold.slot_start == slot.start
     assert hold.slot_end == slot.end
+
+
+async def test_get_availability_survives_capacity_reduction_below_active_count() -> (
+    None
+):
+    # CR-02: reducing a resource's capacity via define_resource while
+    # holds/bookings already occupy the prior (higher) capacity must not
+    # crash get_availability with an uncaught pydantic.ValidationError.
+    # Before the fix, free_fragments computed `capacity - active_count`
+    # unclamped, and a negative `remaining` violated PublicSlot.remaining's
+    # `ge=0` constraint. It should instead degrade gracefully to
+    # "fully booked" (remaining clamped to 0).
+    resource = Resource(
+        id="r1",
+        capacity=3,
+        operating_hours={
+            Weekday.MONDAY: [LocalInterval(start=time(9, 0), end=time(17, 0))],
+        },
+        buffer=timedelta(minutes=0),
+        timezone="America/Chicago",
+        slot_duration=timedelta(minutes=30),
+    )
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(resource)
+
+    result = await engine.get_availability(resource.id, WINDOW_START, WINDOW_END)
+    slot = result.available[0]
+
+    for _ in range(3):
+        await engine.place_hold(
+            resource.id, slot.start, slot.end, ttl_seconds=600
+        )  # fills capacity=3
+
+    # Legal capacity edit — no upstream guard prevents this.
+    await engine.define_resource(resource.model_copy(update={"capacity": 1}))
+
+    result_after_reduction = await engine.get_availability(
+        resource.id, WINDOW_START, WINDOW_END
+    )
+    reduced_slot = next(
+        s for s in result_after_reduction.booked if s.start == slot.start
+    )
+    assert reduced_slot.remaining == 0
+    assert reduced_slot.capacity == 1

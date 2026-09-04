@@ -56,6 +56,17 @@ def free_fragments(
                 if b.start <= midpoint < b.end:
                     active_count += 1
             segment = Interval(start=seg_start, end=seg_end)
-            results.append((segment, capacity - active_count))
+            # CR-02: clamp to 0 rather than letting `remaining` go negative.
+            # `active_count <= capacity` normally holds because
+            # place_hold's CapacityExhaustedError check prevents accepting
+            # more concurrent holds/bookings than a resource's capacity —
+            # but that invariant is enforced only at hold-creation time
+            # against whatever capacity was current then. A later
+            # `define_resource` call that lowers `capacity` below an
+            # already-active count is a legal storage write with no
+            # corresponding guard, so this primitive must degrade
+            # gracefully ("fully booked") instead of emitting a negative
+            # `remaining` that crashes `PublicSlot`'s `ge=0` constraint.
+            results.append((segment, max(0, capacity - active_count)))
 
     return results
