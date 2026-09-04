@@ -150,6 +150,11 @@ class SlotStatus(StrEnum):
     # requirement).
 
 
+class BookingStatus(StrEnum):
+    CONFIRMED = "confirmed"
+    CANCELLED = "cancelled"
+
+
 class ReasonCode(StrEnum):
     """Closed, one-way enum (D-03) — a consumer can exhaustiveness-match on
     this. `IDEMPOTENCY_CONFLICT` is reserved: only Phase 3 raises it, but it
@@ -196,3 +201,4 @@ class Booking(BaseModel):
     slot_start: UtcDatetime
     slot_end: UtcDatetime
     payload: dict[str, Any]
+    status: BookingStatus = BookingStatus.CONFIRMED

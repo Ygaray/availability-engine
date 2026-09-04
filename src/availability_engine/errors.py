@@ -64,6 +64,19 @@ class HoldNotFoundError(AvailabilityEngineError):
         super().__init__(f"hold {hold_id!r} not found")
 
 
+class BookingNotFoundError(AvailabilityEngineError):
+    """Raised when a booking_id does not refer to a currently confirmed
+    booking (unknown id, or already cancelled). Never routed through
+    release_hold's idempotent no-op semantics (D-04) — cancellation of a
+    booking that is not there to cancel is always an error."""
+
+    reason_code = ReasonCode.NOT_FOUND
+
+    def __init__(self, booking_id: str) -> None:
+        self.booking_id = booking_id
+        super().__init__(f"booking {booking_id!r} not found")
+
+
 class ResourceNotFoundError(AvailabilityEngineError):
     """Raised when a resource_id does not refer to a defined Resource."""
 

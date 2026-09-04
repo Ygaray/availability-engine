@@ -12,9 +12,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from availability_engine.contracts import Booking, Hold, Resource
+from availability_engine.contracts import Booking, BookingStatus, Hold, Resource
 from availability_engine.core.intervals import Interval, overlaps
 from availability_engine.errors import (
+    BookingNotFoundError,
     CapacityExhaustedError,
     HoldExpiredError,
     HoldNotFoundError,
@@ -63,9 +64,11 @@ class InMemoryStore:
             if overlaps(hold_interval, window):
                 entries.append(hold)
         for booking in self._bookings.values():
-            # Bookings have no expiry — cancellation is Phase 3's HOLD-06,
-            # out of scope here.
+            # Bookings have no expiry, but a cancelled booking (HOLD-06) must
+            # never count toward active capacity — same as an expired hold.
             if booking.resource_id != resource_id:
+                continue
+            if booking.status == BookingStatus.CANCELLED:
                 continue
             booking_interval = Interval(start=booking.slot_start, end=booking.slot_end)
             if overlaps(booking_interval, window):
@@ -137,3 +140,15 @@ class InMemoryStore:
     async def release_hold(self, hold_id: str) -> None:
         async with self._lock:
             self._holds.pop(hold_id, None)
+
+    async def cancel_booking(self, booking_id: str) -> None:
+        async with self._lock:
+            booking = self._bookings.get(booking_id)
+            if booking is None or booking.status == BookingStatus.CANCELLED:
+                # D-04: unlike release_hold's pop-and-ignore idempotent
+                # no-op, an unknown or already-cancelled booking_id is
+                # always rejected — never a silent no-op.
+                raise BookingNotFoundError(booking_id)
+            self._bookings[booking_id] = booking.model_copy(
+                update={"status": BookingStatus.CANCELLED}
+            )

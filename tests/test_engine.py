@@ -196,6 +196,34 @@ async def test_release_hold_frees_capacity(sample_resource: Resource) -> None:
     await engine.release_hold(hold.id)
 
 
+async def test_cancel_booking_frees_capacity(sample_resource: Resource) -> None:
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(sample_resource)
+
+    result = await engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
+    slot = result.available[0]
+
+    hold = await engine.place_hold(
+        sample_resource.id, slot.start, slot.end, ttl_seconds=60
+    )
+    booking = await engine.confirm_hold(hold.id, payload={})
+    assert await engine.cancel_booking(booking.id) is None
+
+    result_after_cancel = await engine.get_availability(
+        sample_resource.id, WINDOW_START, WINDOW_END
+    )
+    freed_slot = next(
+        s for s in result_after_cancel.available if s.start == slot.start
+    )
+    assert freed_slot.remaining == freed_slot.capacity
+
+    # capacity-1 resource: the freed slot accepts a fresh hold immediately
+    new_hold = await engine.place_hold(
+        sample_resource.id, slot.start, slot.end, ttl_seconds=60
+    )
+    assert new_hold.slot_start == slot.start
+
+
 async def test_place_hold_outside_hours(sample_resource: Resource) -> None:
     # HOLD-08: place_hold must reject a request entirely outside the
     # resource's declared operating hours (sample_resource only has hours
