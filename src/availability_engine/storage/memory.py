@@ -46,6 +46,11 @@ class InMemoryStore:
     _holds: dict[str, Hold] = field(default_factory=dict)
     _bookings: dict[str, Booking] = field(default_factory=dict)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # IN-01: no TTL/eviction — records accumulate for the process lifetime.
+    # Not a correctness bug for this reference in-memory store (and out of
+    # v1 performance scope), but the future SQL backend (Phase 4) will need
+    # an explicit retention/cleanup policy for the equivalent table, since
+    # an unbounded idempotency table has real operational cost there.
     _idempotency: dict[tuple[str, str], IdempotencyRecord] = field(
         default_factory=dict
     )
