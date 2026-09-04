@@ -20,7 +20,8 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 pytestmark = pytest.mark.skipif(
-    shutil.which("uv") is None, reason="uv is required to build/install the wheel under test"
+    shutil.which("uv") is None,
+    reason="uv is required to build/install the wheel under test",
 )
 
 _CHECK_SCRIPT = '''
@@ -57,7 +58,9 @@ print("MIGRATE_OK")
 '''
 
 
-def _run(cmd: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+def _run(
+    cmd: list[str], *, cwd: Path | None = None
+) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
     assert result.returncode == 0, (
         f"command {cmd} failed (exit {result.returncode})\n"
