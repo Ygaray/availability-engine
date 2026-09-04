@@ -35,7 +35,7 @@ which codes contract-first against the stubbed structured output.
 ### Holds & Bookings (`HOLD`)
 
 - [x] **HOLD-01**: Consumer can place a short-lived, atomic hold on a slot with a TTL; the hold is rejected if the slot's capacity is already exhausted
-- [ ] **HOLD-02**: Concurrent hold placement never exceeds capacity — under N concurrent bookers on a capacity-K slot, at most K holds succeed (proven against real Postgres, not only in-memory)
+- [x] **HOLD-02**: Concurrent hold placement never exceeds capacity — under N concurrent bookers on a capacity-K slot, at most K holds succeed (proven against real Postgres, not only in-memory)
 - [x] **HOLD-03**: Consumer can confirm an active, unexpired hold into a Booking, attaching an opaque consumer payload that round-trips untouched
 - [x] **HOLD-04**: Consumer can explicitly release a hold, freeing its capacity immediately
 - [x] **HOLD-05**: Expired holds auto-release lazily — they stop counting against capacity on the next read or hold attempt, with no background sweeper
@@ -111,7 +111,7 @@ Requirement → phase mapping. Phases defined in `.planning/ROADMAP.md`.
 | STORE-03 | Phase 4 | Complete |
 | STORE-04 | Phase 4 | Complete |
 | STORE-05 | Phase 4 | Complete |
-| HOLD-02 | Phase 4 | Pending |
+| HOLD-02 | Phase 4 | Complete |
 | PKG-01 | Phase 5 | Pending |
 | PKG-02 | Phase 5 | Pending |
 | PKG-03 | Phase 5 | Pending |
