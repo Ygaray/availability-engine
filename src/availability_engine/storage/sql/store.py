@@ -387,7 +387,16 @@ class SQLStore:
             if datetime.now(UTC) >= _ensure_utc(hold_row.expires_at):
                 raise HoldExpiredError(hold_id)
 
-            await conn.execute(delete(models.holds).where(models.holds.c.id == hold_id))
+            delete_result = await conn.execute(
+                delete(models.holds).where(models.holds.c.id == hold_id)
+            )
+            if delete_result.rowcount == 0:
+                # CR-01: the hold was concurrently released/expired-and-
+                # reaped/re-confirmed between our SELECT above and this
+                # DELETE — do not materialize a Booking from the now-stale
+                # hold_row snapshot (that would silently override a
+                # concurrent release_hold and can exceed capacity).
+                raise HoldNotFoundError(hold_id)
             booking_payload = payload if payload is not None else {}
             # Hold -> Booking transition: the hold row is deleted and a
             # booking row inserted with the SAME id, inside one transaction.
