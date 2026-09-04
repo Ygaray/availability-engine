@@ -232,6 +232,13 @@ lifecycle end-to-end.
 - `alembic/` scaffolding (STORE-05) is not yet started — still deferred to a later plan
   in this phase per the roadmap.
 
+## Self-Check: PASSED
+
+- FOUND: `.planning/phases/04-sql-backend-concurrency-proof/04-02-SUMMARY.md`
+- FOUND: `ece4a16` (Task 1 commit)
+- FOUND: `f5c2aff` (Task 2 commit)
+- FOUND: `665630f` (SUMMARY.md commit)
+
 ---
 *Phase: 04-sql-backend-concurrency-proof*
 *Completed: 2026-09-04*
