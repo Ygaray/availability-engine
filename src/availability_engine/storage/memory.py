@@ -7,7 +7,6 @@ TOCTOU window (Pitfall 1) even though asyncio is single-threaded.
 """
 
 import asyncio
-import hashlib
 import json
 import uuid
 from dataclasses import dataclass, field
@@ -23,15 +22,12 @@ from availability_engine.errors import (
     HoldNotFoundError,
     IdempotencyConflictError,
 )
+from availability_engine.storage._shared import _fingerprint
 
-
-def _fingerprint(*parts: object) -> str:
-    """Deterministic fingerprint of the call arguments an idempotency key is
-    scoped against. `json.dumps(..., sort_keys=True, default=str)` handles
-    non-JSON-native parts (e.g. `datetime`) via `str()` deterministically."""
-    return hashlib.sha256(
-        json.dumps(parts, sort_keys=True, default=str).encode()
-    ).hexdigest()
+# WR-02: _fingerprint now lives in storage._shared — both this module and
+# sql/store.py import it from there, making the cross-backend idempotency
+# contract explicit rather than one module depending on the other's
+# "private" helper.
 
 
 @dataclass(frozen=True, slots=True)

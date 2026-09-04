@@ -32,7 +32,7 @@ from availability_engine.errors import (
     HoldNotFoundError,
     IdempotencyConflictError,
 )
-from availability_engine.storage.memory import _fingerprint
+from availability_engine.storage._shared import _fingerprint
 from availability_engine.storage.sql import models
 from availability_engine.storage.sql.locking import (
     acquire_postgres_slot_lock,
