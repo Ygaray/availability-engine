@@ -23,17 +23,17 @@ fails, no two bookers can ever double-book the same capacity.
 - [x] Generate a fixed-duration slot grid per resource from its hours + slot length + buffer — Validated in Phase 1: End-to-End Walking Skeleton (GRID-01, GRID-04)
 - [x] Confirm a hold into a booking, carrying an opaque consumer payload — Validated in Phase 1: End-to-End Walking Skeleton (HOLD-03)
 - [x] Define a pluggable async storage protocol; ship an in-memory implementation for tests — Validated in Phase 1: End-to-End Walking Skeleton (STORE-01, STORE-02)
+- [x] Compute structured availability (`available` / `booked` windows) for a resource over a range, capacity-aware (remaining as a count, never a boolean, via sweep-line event counting) — Validated in Phase 2: Capacity & Time Correctness (AVAIL-02, AVAIL-04)
+- [x] Handle timezones TZ-aware, UTC-internal, with a per-resource IANA zone for operating hours + DST, correct across spring-forward/fall-back and midnight-crossing operating hours — Validated in Phase 2: Capacity & Time Correctness (GRID-02, GRID-03)
+- [x] Auto-release expired holds lazily on the next read/attempt via one shared active-entries primitive, no background sweeper — Validated in Phase 2: Capacity & Time Correctness (AVAIL-03, HOLD-05)
+- [x] Publish the structured output contract the consumer renders (stable, documented shapes, machine-readable reason codes on rejection) — Validated in Phase 2: Capacity & Time Correctness (AVAIL-04, HOLD-08)
 
 ### Active
 
-- [ ] Compute structured availability (`available` / `booked` windows, capacity-aware) for a resource over a range — basic single-resource availability shipped in Phase 1 (AVAIL-01); capacity ≥1 correctness across DST/midnight-crossing hours hardened in Phase 2 (AVAIL-02..04)
 - [ ] Place an atomic hold on a slot (short-lived, TTL); reject if capacity is exhausted — in-memory capacity-exhaustion rejection shipped in Phase 1 (HOLD-01); concurrent-under-load proof against real Postgres deferred to Phase 4 (HOLD-02)
-- [ ] Release a hold explicitly, and auto-release expired holds lazily on the next read/attempt — explicit release shipped in Phase 1 (HOLD-04); lazy TTL auto-release deferred to Phase 2 (HOLD-05)
 - [ ] Cancel a confirmed booking
 - [ ] Accept an idempotency key on hold/confirm so a retried call returns the original result instead of acting twice (enforced via a unique constraint)
 - [ ] Ship one SQL storage implementation targeting SQLite (local/dev) and Postgres (prod) with row-lock atomicity
-- [ ] Handle timezones TZ-aware, UTC-internal, with a per-resource IANA zone for operating hours + DST — UTC-boundary rejection at the public API shipped in Phase 1; DST-transition correctness hardened in Phase 2
-- [ ] Publish the structured output contract the consumer renders (stable, documented shapes) — structured `AvailabilityResult`/`Hold`/`Booking` contract shipped in Phase 1; frozen/documented for the parallel consumer in Phase 2
 
 ### Out of Scope
 
@@ -52,6 +52,7 @@ fails, no two bookers can ever double-book the same capacity.
 - **Seed brief:** `README.md` in the repo root is the original seed and core-model sketch; this document supersedes it for planning.
 - **Why not a general calendar:** Google Calendar et al. model events on a calendar, not resources with capacity and atomic holds — so this engine owns that model directly.
 - **Phase 1 complete (2026-09-03):** A working, importable `AvailabilityEngine` over `InMemoryStore` — define a Resource, generate a fixed-duration slot grid, answer structured availability, and place/confirm/release a hold, end to end, TZ-aware at the boundary. All 5 roadmap success criteria and all 13 mapped requirement IDs verified; code review (2 critical + 3 warning + 3 info findings, all resolved), security audit (6 threats, all mitigated/accepted, `threats_open: 0`), and Nyquist validation (zero coverage gaps, 22/22 tests green) all passed.
+- **Phase 2 complete (2026-09-04):** Capacity ≥1 availability is provably correct via sweep-line event counting; DST spring-forward/fall-back and midnight-crossing operating hours are fixture-proven correct on real 2026 transition dates; expired holds auto-release lazily through one shared active-entries primitive; all domain exceptions carry machine-readable `.reason_code`; the public output contract is frozen behind a golden-file conformance test. Executed as 3 plans across 2 waves via isolated git worktrees, merged with one cross-plan integration fix (a hold-expiry test's slot fell outside a fixture resource's operating hours once the new `OutsideHoursError` check landed). Code review then found and fixed 2 further critical cross-plan integration bugs — an overnight-hours `OutsideHoursError` false-rejection and an uncaught crash from reducing capacity below the active-hold count — plus 2 warnings (unvalidated overlapping/zero-length `LocalInterval`s) and 1 info finding, all resolved with regression tests. Security audit: 6 threats (4 accepted per locked project decisions, 2 mitigated and verified in code), `threats_open: 0`. Nyquist validation: zero coverage gaps, 46/46 tests green, `ruff`/`mypy --strict` clean. All 7 roadmap success criteria and all 7 mapped requirement IDs verified.
 
 ## Constraints
 
@@ -69,13 +70,14 @@ fails, no two bookers can ever double-book the same capacity.
 | Pluggable async storage backend (protocol + in-memory + SQL impls) | Atomicity becomes a contract the backend satisfies; keeps the engine reusable and testable | Validated — Phase 1 shipped the Protocol + `InMemoryStore` |
 | Fixed-duration slot grid in v1, interval math extensible to arbitrary windows | Simplest to reason about/query now; avoids a rewrite when continuous bookings are added later | Validated — Phase 1 shipped `grid_slots()` |
 | v1 calendar scope = per-day hours + buffers + capacity>1; recurrence deferred | Covers the first consumer's real needs without the recurrence iceberg | Validated — Phase 1 `Resource` contract |
-| TZ-aware, UTC-internal, per-resource IANA zone | Scheduling engines live or die on DST correctness; per-resource zones support co-located or distributed resources | Validated — Phase 1 UTC-boundary enforcement (both `place_hold` and `get_availability`); DST-transition hardening in Phase 2 |
+| TZ-aware, UTC-internal, per-resource IANA zone | Scheduling engines live or die on DST correctness; per-resource zones support co-located or distributed resources | Validated — Phase 1 UTC-boundary enforcement (both `place_hold` and `get_availability`); Phase 2 fixture-proved DST-transition + midnight-crossing correctness on real 2026 dates |
 | One SQL impl spanning SQLite + Postgres, row-lock atomicity | Zero-infra local dev (SQLite) + prod (Postgres) from one codebase; matches a typical chatbot deploy | — Pending (Phase 4) |
-| Lazy-on-read hold expiry (no background sweeper) | Deterministic and easy to test; a library shouldn't own a runtime lifecycle | — Pending (Phase 2) — Phase 1's code review flagged this as a real gap (`InMemoryStore` never filters by `expires_at`); confirmed correctly deferred, not a Phase 1 regression |
-| Contract-first build against a stubbed structured output | Lets the consumer chatbot progress in parallel; forces an early, stable contract | Validated — Phase 1 shipped `AvailabilityResult`/`Hold`/`Booking` |
+| Lazy-on-read hold expiry (no background sweeper) | Deterministic and easy to test; a library shouldn't own a runtime lifecycle | Validated — Phase 2 collapsed the duplicated active-entries scan into one shared, expiry-filtering primitive (`get_active_entries`) used by every read and write path |
+| Contract-first build against a stubbed structured output | Lets the consumer chatbot progress in parallel; forces an early, stable contract | Validated — Phase 1 shipped `AvailabilityResult`/`Hold`/`Booking`; Phase 2 restructured to the two-list capacity-shape contract (D-04) and froze it behind a golden-file conformance test |
 | Idempotency keys on hold/confirm in v1 | First consumer is network-facing (retries on timeout); without keys a retry double-spends capacity. Cheap now, contract-breaking to retrofit | — Pending (Phase 3) |
 | Portable atomicity: single INSERT…SELECT + capacity WHERE + rowcount; BEGIN IMMEDIATE (SQLite) / FOR UPDATE (Postgres) | The only pattern truly identical across both backends; SQLite has no row-level locking. Statement atomicity is the lock | — Pending (Phase 4) — Phase 1's `InMemoryStore` uses an `asyncio.Lock`-guarded critical section as the in-memory analog |
-| Sweep-line event counting for capacity-aware availability | Binary interval subtraction only works for capacity 1; sweep-line handles capacity ≥ 1 from day one without a v2 rewrite | Validated — Phase 1 shipped `free_fragments()`; code review found the implementation recomputes brute-force per segment rather than incrementally (Info-level, correctness unaffected) |
+| Sweep-line event counting for capacity-aware availability | Binary interval subtraction only works for capacity 1; sweep-line handles capacity ≥ 1 from day one without a v2 rewrite | Validated — Phase 1 shipped `free_fragments()`; Phase 2 hardened it with a hypothesis property test proving `0 <= remaining <= capacity` and clamped `remaining` to 0 (rather than crashing) when a capacity reduction drops below the active-hold count (code review CR-02) |
+| Closed `ReasonCode` enum + `AvailabilityEngineError` exception hierarchy | HOLD-08 requires every rejection to carry a machine-readable reason code the consumer can branch on | Validated — Phase 2 shipped `ReasonCode(StrEnum)` and rebased all domain exceptions onto it, with an exhaustiveness test |
 
 ## Evolution
 
@@ -95,4 +97,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-03 after Phase 1 completion*
+*Last updated: 2026-09-04 after Phase 2 completion*
