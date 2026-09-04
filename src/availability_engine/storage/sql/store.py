@@ -112,11 +112,27 @@ class SQLStore:
                 )
             )
             if existing_id is None:
-                await conn.execute(
-                    insert(models.resources).values(
-                        id=resource.id, definition=definition
+                # WR-01: two concurrent save_resource(resource) calls for a
+                # not-yet-persisted resource.id can both observe
+                # existing_id is None and both attempt the INSERT branch.
+                # Scope the INSERT to a SAVEPOINT (mirrors
+                # _write_idempotency_record's pattern below) so a losing
+                # writer's IntegrityError doesn't abort the whole enclosing
+                # transaction on Postgres, and fall back to UPDATE on
+                # conflict rather than surfacing a raw driver-level error.
+                try:
+                    async with conn.begin_nested():
+                        await conn.execute(
+                            insert(models.resources).values(
+                                id=resource.id, definition=definition
+                            )
+                        )
+                except IntegrityError:
+                    await conn.execute(
+                        update(models.resources)
+                        .where(models.resources.c.id == resource.id)
+                        .values(definition=definition)
                     )
-                )
             else:
                 await conn.execute(
                     update(models.resources)
