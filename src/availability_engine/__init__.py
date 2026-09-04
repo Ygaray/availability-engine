@@ -22,6 +22,7 @@ from availability_engine.errors import (
     ResourceNotFoundError,
 )
 from availability_engine.storage.protocol import StorageBackend
+from availability_engine.sync import SyncAvailabilityEngine
 
 __all__ = [
     "AvailabilityEngine",
@@ -41,5 +42,6 @@ __all__ = [
     "ResourceNotFoundError",
     "SlotStatus",
     "StorageBackend",
+    "SyncAvailabilityEngine",
     "Weekday",
 ]
