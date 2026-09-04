@@ -65,8 +65,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   5. The structured output contract is documented and frozen, with an automated conformance test the parallel consumer's stub can be checked against.
 
 **Plans**: 3 plans
+**Wave 1**
 
 - [ ] 02-01-PLAN.md — Fix midnight-crossing time.py bug + DST fixture tests (GRID-02, GRID-03); pin tzdata/time-machine/hypothesis
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 02-02-PLAN.md — Collapse duplicated active-entries scan into one shared expiry-filtering primitive (AVAIL-03, HOLD-05)
 - [ ] 02-03-PLAN.md — Capacity-shape contract restructure, reason codes, engine wiring, golden-file conformance (AVAIL-02, AVAIL-04, HOLD-08)
 
