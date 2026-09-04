@@ -313,7 +313,17 @@ class SQLStore:
 
             # WR-03: re-read the authoritative capacity from our own store
             # under the transaction/lock rather than trusting the caller-
-            # supplied snapshot.
+            # supplied snapshot — closes the race where a concurrent
+            # save_resource changes capacity between the caller's read and
+            # this lock/transaction acquisition. Fall back to the
+            # caller-supplied `capacity` only if the resource isn't tracked
+            # here (shouldn't happen via the AvailabilityEngine facade,
+            # which already calls get_resource and raises
+            # ResourceNotFoundError before ever reaching this storage call —
+            # see engine.py's place_hold). This mirrors memory.py's
+            # identical fallback and rationale, keeping both backends'
+            # behavior in parity for a caller that invokes SQLStore
+            # directly, bypassing the facade.
             resource_row = (
                 await conn.execute(
                     select(models.resources.c.definition).where(

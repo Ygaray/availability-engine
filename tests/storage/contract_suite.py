@@ -97,6 +97,38 @@ class TestStorageContractSuite:
                 sample_resource.id, slot, capacity=100, ttl_seconds=60
             )
 
+    async def test_place_hold_trusts_caller_capacity_for_unregistered_resource(
+        self, backend_factory: type[InMemoryStore]
+    ) -> None:
+        # WR-03: place_hold's authoritative-capacity re-read intentionally
+        # falls back to the caller-supplied `capacity` argument when
+        # `resource_id` has never been persisted via save_resource — there
+        # is no server-side record to cross-check against at all. This path
+        # is unreachable via AvailabilityEngine.place_hold (engine.py calls
+        # get_resource and raises ResourceNotFoundError first); it only
+        # matters for a caller invoking the StorageBackend directly,
+        # bypassing the facade. Document and pin the behavior explicitly so
+        # it's a deliberate contract, not an untested accident, and so both
+        # backends stay in parity.
+        backend = backend_factory()
+        slot = Interval(
+            start=datetime(2026, 9, 7, 15, 0, tzinfo=UTC),
+            end=datetime(2026, 9, 7, 15, 30, tzinfo=UTC),
+        )
+
+        hold = await backend.place_hold(
+            "unregistered-resource", slot, capacity=1, ttl_seconds=60
+        )
+        assert hold.resource_id == "unregistered-resource"
+
+        # A second hold against the same never-registered resource is
+        # rejected using the caller-supplied capacity=1, exactly as if the
+        # resource *had* been registered with capacity=1.
+        with pytest.raises(CapacityExhaustedError):
+            await backend.place_hold(
+                "unregistered-resource", slot, capacity=1, ttl_seconds=60
+            )
+
     async def test_get_active_entries_excludes_expired_hold(
         self, backend_factory: type[InMemoryStore], sample_resource: Resource
     ) -> None:
