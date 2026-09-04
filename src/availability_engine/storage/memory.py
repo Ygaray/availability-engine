@@ -128,8 +128,24 @@ class InMemoryStore:
                             raise TypeError(
                                 "place_hold idempotency record does not reference a Hold"
                             )
-                        return existing.result
-                    raise IdempotencyConflictError("place_hold", idempotency_key)
+                        # CR-01: re-validate against live state before
+                        # trusting the cached snapshot — the referenced Hold
+                        # may since have been consumed by confirm_hold,
+                        # explicitly released, or simply expired. A stale
+                        # record must never be returned verbatim (it would
+                        # describe a Hold that no longer exists, and would
+                        # permanently strand this key). Fall through to
+                        # re-run the real check-and-write below, which either
+                        # creates a fresh Hold (capacity now free) or
+                        # correctly raises CapacityExhaustedError (capacity
+                        # still occupied, e.g. by the confirmed Booking) —
+                        # either outcome reflects live state, unlike the
+                        # frozen replay.
+                        live = self._holds.get(existing.result.id)
+                        if live is not None and live.expires_at > datetime.now(UTC):
+                            return live
+                    else:
+                        raise IdempotencyConflictError("place_hold", idempotency_key)
             # WR-03: re-read the authoritative capacity from our own store
             # under the lock rather than trusting the caller-supplied
             # snapshot — closes the race where a concurrent
@@ -192,7 +208,15 @@ class InMemoryStore:
                                 "confirm_hold idempotency record does not "
                                 "reference a Booking"
                             )
-                        return existing.result
+                        # CR-01: always return the live record, not the
+                        # frozen snapshot — the cached Booking's status is
+                        # stale if it was subsequently cancelled via
+                        # cancel_booking. Falls back to the snapshot only if
+                        # the id has somehow been removed from _bookings
+                        # (never happens today — bookings are never deleted,
+                        # only status-transitioned — but this keeps the
+                        # replay safe if that ever changes).
+                        return self._bookings.get(existing.result.id, existing.result)
                     raise IdempotencyConflictError("confirm_hold", idempotency_key)
             hold = self._holds.get(hold_id)
             if hold is None:
