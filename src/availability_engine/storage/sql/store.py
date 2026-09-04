@@ -34,7 +34,10 @@ from availability_engine.errors import (
 )
 from availability_engine.storage.memory import _fingerprint
 from availability_engine.storage.sql import models
-from availability_engine.storage.sql.locking import acquire_postgres_slot_lock
+from availability_engine.storage.sql.locking import (
+    acquire_postgres_slot_lock,
+    attach_sqlite_begin_immediate,
+)
 
 
 def _ensure_utc(value: datetime) -> datetime:
@@ -86,6 +89,16 @@ class SQLStore:
     `locking.py`."""
 
     def __init__(self, engine: AsyncEngine) -> None:
+        # CR-02: SQLite's write-serialization fix (BEGIN IMMEDIATE) is what
+        # makes place_hold phantom-safe on SQLite — wire it in here so the
+        # "obvious" construction path (`SQLStore(create_async_engine(...))`)
+        # is safe by default, rather than requiring every consumer to
+        # discover and call `attach_sqlite_begin_immediate` themselves.
+        # Idempotent (see locking.py) — safe even if the caller (or a test
+        # fixture) already attached it, and safe across the many SQLStore
+        # instances typically constructed against one shared engine.
+        if engine.sync_engine.dialect.name == "sqlite":
+            attach_sqlite_begin_immediate(engine)
         self._engine = engine
 
     # -- Resource CRUD --------------------------------------------------

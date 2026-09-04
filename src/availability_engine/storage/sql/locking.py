@@ -19,8 +19,10 @@ untouched), not a new design. Wave 3's HOLD-02 concurrency test is the
 empirical arbiter of this fix.
 """
 
+import weakref
+
 from sqlalchemy import event, text
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from sqlalchemy.pool import ConnectionPoolEntry
@@ -47,6 +49,20 @@ async def acquire_postgres_slot_lock(
     )
 
 
+# CR-02: a process-wide WeakSet of sync Engines that already have the
+# listeners attached, so this function is safe to call more than once
+# against the SAME physical engine. `SQLStore.__init__` now calls this
+# automatically for every SQLStore constructed against a sqlite engine (see
+# store.py) — since a single session-scoped engine commonly backs many
+# SQLStore instances (e.g. one per test), re-registering the
+# "connect"/"begin" listeners on every construction would stack duplicate
+# listeners and issue `BEGIN IMMEDIATE` more than once per transaction,
+# raising a driver error. A WeakSet (rather than an attribute on Engine,
+# which SQLAlchemy's stubs don't expose for arbitrary extensibility) never
+# outlives the engines it tracks.
+_attached_engines: "weakref.WeakSet[Engine]" = weakref.WeakSet()
+
+
 def attach_sqlite_begin_immediate(engine: AsyncEngine) -> None:
     """Register the two-event-listener recipe that gives SQLite a whole-
     database RESERVED write lock (BEGIN IMMEDIATE) for every transaction —
@@ -57,9 +73,17 @@ def attach_sqlite_begin_immediate(engine: AsyncEngine) -> None:
       SQLite resolution).
     - "begin": issue BEGIN IMMEDIATE instead of the driver's default
       DEFERRED transaction.
-    """
 
-    @event.listens_for(engine.sync_engine, "connect")
+    Idempotent per physical engine (see `_attached_engines` above) — safe
+    to call multiple times (directly, and/or via `SQLStore.__init__`)
+    against the same `AsyncEngine`.
+    """
+    sync_engine = engine.sync_engine
+    if sync_engine in _attached_engines:
+        return
+    _attached_engines.add(sync_engine)
+
+    @event.listens_for(sync_engine, "connect")
     def _do_connect(
         dbapi_connection: DBAPIConnection, connection_record: ConnectionPoolEntry
     ) -> None:
@@ -71,7 +95,7 @@ def attach_sqlite_begin_immediate(engine: AsyncEngine) -> None:
         cursor.execute("PRAGMA busy_timeout=5000")
         cursor.close()
 
-    @event.listens_for(engine.sync_engine, "begin")
+    @event.listens_for(sync_engine, "begin")
     def _do_begin(conn: Connection) -> None:
         # Whole-database RESERVED write lock, phantom-safe by construction —
         # only ever one writer transaction on a SQLite file at a time under
