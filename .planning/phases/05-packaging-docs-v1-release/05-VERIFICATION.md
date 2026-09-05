@@ -2,8 +2,8 @@
 phase: 05-packaging-docs-v1-release
 verified: 2026-09-05T04:52:16Z
 refreshed: 2026-09-05T06:10:00Z
-status: human_needed
-score: 3/4 must-haves verified (criterion 4 intentionally pending human-gated tag cut)
+status: verified
+score: 4/4 must-haves verified (criterion 4 satisfied 2026-09-05 -- v0.1.0 tag cut and pushed after human approval)
 behavior_unverified: 0
 overrides_applied: 0
 human_verification:
@@ -17,7 +17,7 @@ human_verification:
 **Phase Goal:** The library is packaged, documented, and cut as a v1 git tag the first consumer can repin to, with an example integration proving the frozen contract matches the consumer's stub.
 **Verified:** 2026-09-05T04:52:16Z
 **Refreshed:** 2026-09-05T06:10:00Z (post code-review-fix pass + security-audit UF-1 fix — see addendum below)
-**Status:** human_needed
+**Status:** verified (goal met)
 **Re-verification:** No — initial verification, freshness-refreshed after two subsequent fix passes
 
 ## FRESHNESS ADDENDUM (2026-09-05T06:10:00Z)
@@ -126,6 +126,31 @@ cutting and pushing the `v0.1.0` tag is 05-05-PLAN.md's own deliberately sequenc
 
 ---
 
+## TAG-CUT ADDENDUM (2026-09-05T09:00:00Z)
+
+Criterion 4 (previously ⚠ PENDING) is now ✓ VERIFIED. The operator approved 05-05-PLAN.md Task 1's
+blocking `checkpoint:human-verify` (recorded in `05-CONTEXT.md` Runtime Decisions). Task 2 then ran,
+re-confirming both gating suites green at the tagged commit immediately beforehand:
+
+```
+uv run pytest -q
+→ 139 passed, 1 warning in 32.16s
+
+uv run --group conformance pytest tests/integration/ -x -q
+→ 13 passed in 2.68s
+```
+
+`git tag -a v0.1.0 -m "..."` and `git push origin v0.1.0` were run at commit `3fc81b2`.
+`git ls-remote --tags origin` confirms `refs/tags/v0.1.0` live on `origin`
+(`cb88b724a7bc034bae5c74467c5615c3c38f0b5a refs/tags/v0.1.0`, annotated-tag object pointing at
+`3fc81b2d462a950bea989725562af93a0c7b27ed`).
+
+**Revised score: 4/4 truths verified.** PKG-03 is now fully satisfied. Phase 5 goal is fully
+achieved; the v1.0 milestone's 5 phases are all complete.
+
+---
+
 *Verified: 2026-09-05T04:52:16Z*
 *Refreshed: 2026-09-05T06:10:00Z*
-*Verifier: Claude (gsd-verifier); refresh: milestone-phase-orchestrator*
+*Tag-cut addendum: 2026-09-05T09:00:00Z*
+*Verifier: Claude (gsd-verifier); refresh: milestone-phase-orchestrator; tag-cut addendum: milestone-phase-orchestrator*
