@@ -130,14 +130,14 @@ Plans:
   3. An example integration fulfills the consumer's stub and passes the contract conformance test end to end.
   4. v1.0 is cut as a git tag / release the first consumer can repin to.
 
-**Plans**: 5 plans
+**Plans**: 4/5 plans executed
 
 Plans:
 
-- [ ] 05-01-PLAN.md — Fix confirmed packaging bug: force-include Alembic migrations + py.typed marker, proven by a real build+install+migrate round trip (PKG-01, D-05)
-- [ ] 05-02-PLAN.md — Sync facade: background-thread event-loop bridge over AvailabilityEngine, proven safe from inside a running event loop (PKG-01, D-04)
-- [ ] 05-03-PLAN.md — Example AvailabilityPort adapter + cross-repo AvailabilityContractSuite conformance proof (PKG-03, D-02, D-03)
-- [ ] 05-04-PLAN.md — README.md documenting the frozen contract as the stable product surface, with an automated doc-example regression test (PKG-02)
+- [x] 05-01-PLAN.md — Fix confirmed packaging bug: force-include Alembic migrations + py.typed marker, proven by a real build+install+migrate round trip (PKG-01, D-05)
+- [x] 05-02-PLAN.md — Sync facade: background-thread event-loop bridge over AvailabilityEngine, proven safe from inside a running event loop (PKG-01, D-04)
+- [x] 05-03-PLAN.md — Example AvailabilityPort adapter + cross-repo AvailabilityContractSuite conformance proof (PKG-03, D-02, D-03)
+- [x] 05-04-PLAN.md — README.md documenting the frozen contract as the stable product surface, with an automated doc-example regression test (PKG-02)
 - [ ] 05-05-PLAN.md — Cut and push the v0.1.0 release tag, gated on full-suite-green (PKG-03, D-01)
 
 ## Progress
@@ -151,6 +151,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Capacity & Time Correctness | 3/3 | Complete    | 2026-09-04 |
 | 3. Idempotency & Cancellation | 2/2 | Complete    | 2026-09-04 |
 | 4. SQL Backend & Concurrency Proof | 4/4 | Complete    | 2026-09-04 |
-| 5. Packaging, Docs & v1 Release | 0/TBD | Not started | - |
+| 5. Packaging, Docs & v1 Release | 4/5 | In Progress|  |
 </content>
 </invoke>
