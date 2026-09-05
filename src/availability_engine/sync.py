@@ -151,3 +151,9 @@ class SyncAvailabilityEngine:
             raise RuntimeError(
                 "SyncAvailabilityEngine failed to stop within timeout"
             )
+        # IN-02: release the loop's own resources (e.g. selector file
+        # descriptors) now that the background thread has actually
+        # exited. Only reached on a successful join, so `_call()`'s
+        # `is_closed()` guard (WR-01) never races a loop that is still
+        # in use.
+        self._loop.close()

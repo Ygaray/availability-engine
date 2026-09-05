@@ -62,6 +62,32 @@ def test_close_stops_background_thread(sample_resource: Resource) -> None:
     assert not engine._thread.is_alive()
 
 
+def test_close_closes_the_underlying_event_loop(sample_resource: Resource) -> None:
+    """Test B2 (IN-02): close() releases the loop's own resources, not
+    just the thread -- the loop object itself ends up closed()."""
+    engine = SyncAvailabilityEngine(InMemoryStore())
+
+    engine.close()
+
+    assert engine._loop.is_closed()
+
+
+def test_call_after_close_raises_immediately_instead_of_hanging(
+    sample_resource: Resource,
+) -> None:
+    """WR-01 regression: calling a method on the facade after close() has
+    completed must raise RuntimeError immediately -- not hang the calling
+    thread forever waiting on a callback nothing is left to run. Guarded
+    by pytest's default test timeout in spirit; the load-bearing assertion
+    is that this call returns (by raising) at all."""
+    engine = SyncAvailabilityEngine(InMemoryStore())
+    engine.define_resource(sample_resource)
+    engine.close()
+
+    with pytest.raises(RuntimeError, match="close"):
+        engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
+
+
 def test_naive_datetime_raises_same_boundary_error(
     sample_resource: Resource,
 ) -> None:
