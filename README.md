@@ -72,13 +72,19 @@ event loop` the moment a caller invokes it from inside its own already-running l
 driven by an outer `asyncio.run()`.
 
 ```python
+from datetime import UTC, datetime
+
 from availability_engine import SyncAvailabilityEngine
 from availability_engine.storage.memory import InMemoryStore
 
 engine = SyncAvailabilityEngine(InMemoryStore())
 engine.define_resource(resource)
 
-result = engine.get_availability("table-1", window_start, window_end)
+result = engine.get_availability(
+    "table-1",
+    datetime(2026, 9, 7, 0, 0, tzinfo=UTC),
+    datetime(2026, 9, 8, 0, 0, tzinfo=UTC),
+)
 slot = result.available[0]
 
 hold = engine.place_hold(resource.id, slot.start, slot.end, ttl_seconds=60)
@@ -94,7 +100,7 @@ or logging — every `AvailabilityEngine` exception propagates unchanged through
 
 ## Storage protocol
 
-`availability_engine.storage.protocol.StorageBackend` is a `typing.Protocol` with 6 async methods
+`availability_engine.storage.protocol.StorageBackend` is a `typing.Protocol` with 7 async methods
 (`save_resource`, `get_resource`, `get_active_entries`, `place_hold`, `confirm_hold`,
 `release_hold`, `cancel_booking` — structural typing, no inheritance required). Two implementations
 ship in this package:
@@ -121,7 +127,11 @@ cfg.set_main_option("sqlalchemy.url", "<your real DB URL>")
 command.upgrade(cfg, "head")
 ```
 
-Equivalently, from a shell with `alembic.ini` available: `alembic upgrade head`.
+If working from a checkout of **this repo** (not an installed wheel), `cd` into it and run
+`alembic upgrade head` directly — its `alembic.ini` has `script_location = alembic`, a path
+resolved relative to the shell's current working directory. This CLI shortcut does **not** work
+against an installed wheel (there is no repo checkout to `cd` into) — use the programmatic
+`get_script_location()` path above for that case.
 
 ## Output contract
 
@@ -175,7 +185,7 @@ Cited exactly as proven — not a broader "thread-safe" claim:
 - **SQLite:** `attach_sqlite_begin_immediate` issues `BEGIN IMMEDIATE` for every transaction
   (SQLite has no row-level locking at all), giving the whole database file a RESERVED write lock
   upfront — phantom-safe by construction, since there is effectively one writer at a time.
-- **Empirical proof, not just reasoning:** `tests/test_concurrency_proof.py` drives real,
+- **Empirical proof, not just reasoning:** `tests/storage/test_concurrency_proof.py` drives real,
   independently-connected concurrent clients against a real testcontainers-Postgres instance
   (K=1/N=25 and K=3/N=30 capacity-vs-concurrent-attempts sweeps, exact success counts, verified
   clean across repeated runs).
