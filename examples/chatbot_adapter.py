@@ -36,6 +36,7 @@ no-payload-in-constructor rule) — every re-raise below carries no message.
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime
 
 from chatbot_engine.availability.port import (
@@ -80,6 +81,12 @@ class AvailabilityEngineAdapter(AvailabilityPort):
         # "retry whose original hold was already confirmed" in place_hold's
         # exception-translation below.
         self._confirmed_keys: set[str] = set()
+        # WR-02: guards both dicts/sets above. This adapter crosses a
+        # thread boundary via SyncAvailabilityEngine, and its own
+        # docstring presents it as a copyable production template where a
+        # ConversationService may call place_hold/confirm_hold from
+        # multiple threads/tasks against the same adapter instance.
+        self._keys_lock = threading.Lock()
 
     def query_availability(
         self, resource_type: str, window: tuple[datetime, datetime], party_size: int
@@ -117,8 +124,9 @@ class AvailabilityEngineAdapter(AvailabilityPort):
         # brand-new Hold instead of raising. Checking here makes the
         # behavior independent of live capacity, matching
         # AvailabilityPort.place_hold's documented contract.
-        if idempotency_key in self._confirmed_keys:
-            raise HoldConflict()
+        with self._keys_lock:
+            if idempotency_key in self._confirmed_keys:
+                raise HoldConflict()
         resource_id, start_iso, end_iso = slot_id.split("|")
         start = datetime.fromisoformat(start_iso)
         end = datetime.fromisoformat(end_iso)
@@ -141,7 +149,8 @@ class AvailabilityEngineAdapter(AvailabilityPort):
             # Reused key for a genuinely different slot.
             raise HoldConflict() from exc
         if idempotency_key:
-            self._hold_keys[idempotency_key] = hold.id
+            with self._keys_lock:
+                self._hold_keys[idempotency_key] = hold.id
         return ConsumerHold(
             hold_id=hold.id, slot_id=slot_id, expires_at=hold.expires_at
         )
@@ -158,9 +167,10 @@ class AvailabilityEngineAdapter(AvailabilityPort):
             )
         except (HoldExpiredError, HoldNotFoundError) as exc:
             raise HoldExpired() from exc
-        for key, produced_hold_id in self._hold_keys.items():
-            if produced_hold_id == hold_id:
-                self._confirmed_keys.add(key)
+        with self._keys_lock:
+            for key, produced_hold_id in self._hold_keys.items():
+                if produced_hold_id == hold_id:
+                    self._confirmed_keys.add(key)
         return ConsumerBooking(
             booking_id=booking.id,
             slot_id=(
