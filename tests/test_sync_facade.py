@@ -7,6 +7,8 @@ loop`) does not happen with the `run_coroutine_threadsafe` bridge.
 """
 
 import asyncio
+import threading
+import time
 from datetime import UTC, datetime
 
 import pytest
@@ -86,6 +88,44 @@ def test_call_after_close_raises_immediately_instead_of_hanging(
 
     with pytest.raises(RuntimeError, match="close"):
         engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
+
+
+def test_close_raises_runtime_error_when_thread_fails_to_join_in_time(
+    sample_resource: Resource,
+) -> None:
+    """WR-04 regression: `close()` must raise `RuntimeError` -- not return
+    silently -- if the background thread does not exit within its join
+    timeout. Exercised with a REAL slow shutdown (a coroutine that blocks
+    the event-loop thread itself with a synchronous `time.sleep()` longer
+    than the join timeout), not a mocked `Thread.join`/`is_alive` -- this
+    is the actual failure class WR-04 exists to surface: `close()` calling
+    `loop.stop()` cannot preempt a callback that is currently blocking the
+    loop's own thread, so the join genuinely times out."""
+    engine = SyncAvailabilityEngine(InMemoryStore())
+    engine.define_resource(sample_resource)
+
+    done = threading.Event()
+
+    def blocks_the_loop_thread() -> None:
+        # A plain synchronous callback (not a coroutine) blocks the single
+        # thread driving this loop's `run_forever()` for real -- scheduled
+        # directly via `call_soon_threadsafe` (like `close()`'s own
+        # `loop.stop()` callback) so callback ordering is deterministic:
+        # both calls are made from this thread in sequence, and
+        # `call_soon_threadsafe` callbacks run in FIFO order, so this
+        # blocking callback is guaranteed to run BEFORE the `loop.stop()`
+        # callback `close()` schedules immediately after.
+        time.sleep(8)
+        done.set()
+
+    engine._loop.call_soon_threadsafe(blocks_the_loop_thread)
+
+    with pytest.raises(RuntimeError, match="failed to stop"):
+        engine.close()
+
+    # Let the real background thread actually finish and exit cleanly so
+    # it doesn't leak into other tests.
+    assert done.wait(timeout=15)
 
 
 def test_naive_datetime_raises_same_boundary_error(
