@@ -131,7 +131,8 @@ class InMemoryStore:
                         # weakened.
                         if not isinstance(existing.result, Hold):
                             raise TypeError(
-                                "place_hold idempotency record does not reference a Hold"
+                                "place_hold idempotency record does not "
+                                "reference a Hold"
                             )
                         # CR-01: re-validate against live state before
                         # trusting the cached snapshot — the referenced Hold

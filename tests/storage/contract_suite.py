@@ -248,7 +248,7 @@ class TestStorageContractSuite:
 
         assert first.id == second.id
 
-    async def test_place_hold_idempotent_replay_after_release_creates_fresh_hold_at_storage_level(
+    async def test_place_hold_idempotent_replay_after_release_creates_fresh_hold_at_storage_level(  # noqa: E501
         self, backend_factory: type[InMemoryStore], sample_resource: Resource
     ) -> None:
         # CR-01: once the original Hold behind a cached idempotency record
@@ -284,7 +284,7 @@ class TestStorageContractSuite:
         entries = await backend.get_active_entries(sample_resource.id, slot)
         assert second in entries
 
-    async def test_place_hold_idempotent_replay_after_expiry_creates_fresh_hold_at_storage_level(
+    async def test_place_hold_idempotent_replay_after_expiry_creates_fresh_hold_at_storage_level(  # noqa: E501
         self, backend_factory: type[InMemoryStore], sample_resource: Resource
     ) -> None:
         # CR-01: an expired (but never explicitly released) Hold must also
@@ -318,7 +318,7 @@ class TestStorageContractSuite:
             entries = await backend.get_active_entries(sample_resource.id, slot)
             assert second in entries
 
-    async def test_place_hold_idempotent_replay_after_confirm_raises_capacity_exhausted_at_storage_level(
+    async def test_place_hold_idempotent_replay_after_confirm_raises_capacity_exhausted_at_storage_level(  # noqa: E501
         self, backend_factory: type[InMemoryStore], sample_resource: Resource
     ) -> None:
         # CR-01: once the original Hold has been confirmed into a Booking,
@@ -351,7 +351,7 @@ class TestStorageContractSuite:
                 idempotency_key="confirm-k",
             )
 
-    async def test_confirm_hold_idempotent_replay_after_cancel_reflects_live_status_at_storage_level(
+    async def test_confirm_hold_idempotent_replay_after_cancel_reflects_live_status_at_storage_level(  # noqa: E501
         self, backend_factory: type[InMemoryStore], sample_resource: Resource
     ) -> None:
         # CR-01: a confirm_hold replay after the resulting Booking has been
@@ -462,7 +462,7 @@ class TestStorageContractSuite:
                 hold.id, payload={"x": 2}, idempotency_key="confirm-conflict-k"
             )
 
-    async def test_confirm_hold_idempotent_replay_after_hold_already_deleted_at_storage_level(
+    async def test_confirm_hold_idempotent_replay_after_hold_already_deleted_at_storage_level(  # noqa: E501
         self, backend_factory: type[InMemoryStore], sample_resource: Resource
     ) -> None:
         # WR-01: end-to-end proof of the ordering requirement documented in
