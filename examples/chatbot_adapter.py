@@ -36,6 +36,7 @@ no-payload-in-constructor rule) — every re-raise below carries no message.
 
 from __future__ import annotations
 
+import json
 import threading
 from datetime import datetime
 
@@ -100,7 +101,14 @@ class AvailabilityEngineAdapter(AvailabilityPort):
                 continue
             # Encodes both start AND end (unlike a naive start-only
             # encoding) — place_hold below needs the end time too.
-            slot_id = f"{s.resource_id}|{s.start.isoformat()}|{s.end.isoformat()}"
+            # WR-03: json.dumps (not an unescaped "|"-joined string) so a
+            # resource_id containing "|" (a plausible domain-injected id,
+            # since the engine names zero domain concepts and imposes no
+            # character restriction on Resource.id) can never desync the
+            # inverse split() in place_hold below.
+            slot_id = json.dumps(
+                [s.resource_id, s.start.isoformat(), s.end.isoformat()]
+            )
             slots.append(
                 ConsumerSlot(
                     slot_id=slot_id,
@@ -127,7 +135,10 @@ class AvailabilityEngineAdapter(AvailabilityPort):
         with self._keys_lock:
             if idempotency_key in self._confirmed_keys:
                 raise HoldConflict()
-        resource_id, start_iso, end_iso = slot_id.split("|")
+        # WR-03: inverse of the json.dumps encoding above -- correctly
+        # round-trips a resource_id containing any character, including
+        # "|", unlike the old unescaped "|".split("|").
+        resource_id, start_iso, end_iso = json.loads(slot_id)
         start = datetime.fromisoformat(start_iso)
         end = datetime.fromisoformat(end_iso)
         try:
@@ -173,9 +184,17 @@ class AvailabilityEngineAdapter(AvailabilityPort):
                     self._confirmed_keys.add(key)
         return ConsumerBooking(
             booking_id=booking.id,
-            slot_id=(
-                f"{booking.resource_id}|"
-                f"{booking.slot_start.isoformat()}|{booking.slot_end.isoformat()}"
+            # WR-03: same json.dumps encoding as query_availability's
+            # slot_id above, for consistency (this value is opaque to the
+            # consumer and never re-parsed in this file, but keeping one
+            # encoding scheme avoids reintroducing the unescaped-"|" bug
+            # if that ever changes).
+            slot_id=json.dumps(
+                [
+                    booking.resource_id,
+                    booking.slot_start.isoformat(),
+                    booking.slot_end.isoformat(),
+                ]
             ),
             # Reuses the engine's own already-uuid4() booking.id (which,
             # per storage/memory.py, equals the original hold.id) as BOTH

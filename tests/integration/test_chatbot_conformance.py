@@ -13,11 +13,17 @@ raise there too).
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from collections.abc import Generator
+from datetime import UTC, datetime, time, timedelta
 
 import pytest
 from chatbot_engine.availability.port import AvailabilityPort, HoldConflict
 from chatbot_engine.availability.testing.contract import AvailabilityContractSuite
+from examples.chatbot_adapter import AvailabilityEngineAdapter
+
+from availability_engine.contracts import LocalInterval, Resource, Weekday
+from availability_engine.storage.memory import InMemoryStore
+from availability_engine.sync import SyncAvailabilityEngine
 
 
 class TestChatbotConformance(AvailabilityContractSuite):
@@ -49,3 +55,51 @@ def test_place_hold_retry_after_confirm_raises_hold_conflict_on_capacity2(
         capacity2_port.place_hold(
             slot.slot_id, ttl_seconds=300, idempotency_key=idempotency_key
         )
+
+
+@pytest.fixture
+def pipe_resource_id_port() -> Generator[AvailabilityPort, None, None]:
+    """WR-03 regression fixture: a resource_id containing the old raw
+    delimiter character, "|" -- a plausible domain-injected id, since the
+    engine names zero domain concepts and imposes no character
+    restriction on Resource.id."""
+    store = InMemoryStore()
+    engine = SyncAvailabilityEngine(store)
+    engine.define_resource(
+        Resource(
+            id="table|1",
+            capacity=1,
+            operating_hours={
+                weekday: [LocalInterval(start=time(0, 0), end=time(23, 59))]
+                for weekday in Weekday
+            },
+            buffer=timedelta(minutes=0),
+            timezone="America/Chicago",
+            slot_duration=timedelta(minutes=30),
+        )
+    )
+    adapter = AvailabilityEngineAdapter(engine)
+    try:
+        yield adapter
+    finally:
+        engine.close()
+
+
+def test_place_hold_succeeds_for_resource_id_containing_pipe_character(
+    pipe_resource_id_port: AvailabilityPort,
+) -> None:
+    """WR-03 regression: a resource_id containing "|" must not corrupt
+    slot_id encoding/decoding -- place_hold must succeed against the
+    correct resource_id/start/end rather than raising an unhandled
+    ValueError (or unpacking to the wrong fields) from a naive
+    "|"-delimited split()."""
+    window = (datetime.now(UTC), datetime.now(UTC) + timedelta(days=2))
+    slots = pipe_resource_id_port.query_availability("table|1", window, party_size=1)
+    assert slots, "expected at least one available slot in the query window"
+    slot = slots[0]
+    assert slot.resource_id == "table|1"
+
+    hold = pipe_resource_id_port.place_hold(
+        slot.slot_id, ttl_seconds=300, idempotency_key="pipe-id-key"
+    )
+    assert hold.slot_id == slot.slot_id
