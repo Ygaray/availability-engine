@@ -17,7 +17,11 @@ from collections.abc import Generator
 from datetime import UTC, datetime, time, timedelta
 
 import pytest
-from chatbot_engine.availability.port import AvailabilityPort, HoldConflict
+from chatbot_engine.availability.port import (
+    AvailabilityPort,
+    HoldConflict,
+    SlotUnavailable,
+)
 from chatbot_engine.availability.testing.contract import AvailabilityContractSuite
 from examples.chatbot_adapter import AvailabilityEngineAdapter
 
@@ -55,6 +59,18 @@ def test_place_hold_retry_after_confirm_raises_hold_conflict_on_capacity2(
         capacity2_port.place_hold(
             slot.slot_id, ttl_seconds=300, idempotency_key=idempotency_key
         )
+
+
+def test_place_hold_raises_slot_unavailable_for_malformed_slot_id(
+    port: AvailabilityPort,
+) -> None:
+    """UF-1 regression: slot_id is an unauthenticated bearer capability
+    token -- a malformed/tampered value must translate to the typed
+    SlotUnavailable the AvailabilityPort contract guarantees, not a raw
+    json.JSONDecodeError/ValueError/TypeError leaking out of place_hold's
+    internal parse."""
+    with pytest.raises(SlotUnavailable):
+        port.place_hold("not-valid-json", ttl_seconds=60, idempotency_key="some-key")
 
 
 @pytest.fixture

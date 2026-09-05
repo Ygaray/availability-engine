@@ -138,9 +138,17 @@ class AvailabilityEngineAdapter(AvailabilityPort):
         # WR-03: inverse of the json.dumps encoding above -- correctly
         # round-trips a resource_id containing any character, including
         # "|", unlike the old unescaped "|".split("|").
-        resource_id, start_iso, end_iso = json.loads(slot_id)
-        start = datetime.fromisoformat(start_iso)
-        end = datetime.fromisoformat(end_iso)
+        # UF-1: slot_id is an unauthenticated bearer capability token --
+        # a malformed/truncated/tampered value (not JSON, not a 3-element
+        # list, or non-ISO date strings) must translate to the typed
+        # SlotUnavailable the AvailabilityPort contract guarantees for
+        # this method, not a raw JSONDecodeError/ValueError/TypeError.
+        try:
+            resource_id, start_iso, end_iso = json.loads(slot_id)
+            start = datetime.fromisoformat(start_iso)
+            end = datetime.fromisoformat(end_iso)
+        except (json.JSONDecodeError, ValueError, TypeError) as exc:
+            raise SlotUnavailable() from exc
         try:
             hold = self._engine.place_hold(
                 resource_id, start, end, ttl_seconds, idempotency_key=idempotency_key
