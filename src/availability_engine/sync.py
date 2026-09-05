@@ -137,6 +137,17 @@ class SyncAvailabilityEngine:
         self._call(self._engine.cancel_booking(booking_id))
 
     def close(self) -> None:
-        """Stop the background loop cleanly -- call at consumer shutdown."""
+        """Stop the background loop cleanly -- call at consumer shutdown.
+
+        Raises `RuntimeError` if the background thread does not exit
+        within the timeout (WR-04) -- silently returning here would
+        contradict the documented "stops within a bounded timeout"
+        guarantee in the one case (a slow/stuck shutdown) it exists to
+        cover.
+        """
         self._loop.call_soon_threadsafe(self._loop.stop)
         self._thread.join(timeout=5)
+        if self._thread.is_alive():
+            raise RuntimeError(
+                "SyncAvailabilityEngine failed to stop within timeout"
+            )
