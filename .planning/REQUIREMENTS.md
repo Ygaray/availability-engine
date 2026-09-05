@@ -53,8 +53,8 @@ which codes contract-first against the stubbed structured output.
 
 ### Packaging & Contract (`PKG`)
 
-- [ ] **PKG-01**: The library is packaged with `uv` + `hatchling` for Python 3.12+, installable via git-tag pin
-- [ ] **PKG-02**: The public API surface (engine facade + storage protocol + output contract) is documented, including concurrency guarantees and TZ/DST semantics
+- [x] **PKG-01**: The library is packaged with `uv` + `hatchling` for Python 3.12+, installable via git-tag pin
+- [x] **PKG-02**: The public API surface (engine facade + storage protocol + output contract) is documented, including concurrency guarantees and TZ/DST semantics
 - [x] **PKG-03**: v1 is cut as a git tag / release the first consumer can repin to
 
 ---
@@ -112,6 +112,6 @@ Requirement → phase mapping. Phases defined in `.planning/ROADMAP.md`.
 | STORE-04 | Phase 4 | Complete |
 | STORE-05 | Phase 4 | Complete |
 | HOLD-02 | Phase 4 | Complete |
-| PKG-01 | Phase 5 | Pending |
-| PKG-02 | Phase 5 | Pending |
+| PKG-01 | Phase 5 | Complete |
+| PKG-02 | Phase 5 | Complete |
 | PKG-03 | Phase 5 | Complete |

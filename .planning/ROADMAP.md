@@ -26,7 +26,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Capacity & Time Correctness** - Capacity-aware (≥1) availability, DST/midnight-crossing correctness, lazy expiry, reason codes, and a frozen documented contract (completed 2026-09-04)
 - [x] **Phase 3: Idempotency & Cancellation** - Retry-safe hold/confirm via idempotency keys and cancellation of confirmed bookings (completed 2026-09-04)
 - [x] **Phase 4: SQL Backend & Concurrency Proof** - Real SQLite+Postgres backend swaps in beneath the engine, with a testcontainers-Postgres proof that concurrent holds never overbook (completed 2026-09-04)
-- [ ] **Phase 5: Packaging, Docs & v1 Release** - Packaged, documented, and cut as a v1 git tag the first consumer can repin to
+- [x] **Phase 5: Packaging, Docs & v1 Release** - Packaged, documented, and cut as a v1 git tag the first consumer can repin to (completed 2026-09-05)
 
 ## Phase Details
 
@@ -130,7 +130,7 @@ Plans:
   3. An example integration fulfills the consumer's stub and passes the contract conformance test end to end.
   4. v1.0 is cut as a git tag / release the first consumer can repin to.
 
-**Plans**: 4/5 plans executed
+**Plans**: 5/5 plans executed
 
 Plans:
 
@@ -138,7 +138,7 @@ Plans:
 - [x] 05-02-PLAN.md — Sync facade: background-thread event-loop bridge over AvailabilityEngine, proven safe from inside a running event loop (PKG-01, D-04)
 - [x] 05-03-PLAN.md — Example AvailabilityPort adapter + cross-repo AvailabilityContractSuite conformance proof (PKG-03, D-02, D-03)
 - [x] 05-04-PLAN.md — README.md documenting the frozen contract as the stable product surface, with an automated doc-example regression test (PKG-02)
-- [ ] 05-05-PLAN.md — Cut and push the v0.1.0 release tag, gated on full-suite-green (PKG-03, D-01)
+- [x] 05-05-PLAN.md — Cut and push the v0.1.0 release tag, gated on full-suite-green (PKG-03, D-01)
 
 ## Progress
 
@@ -151,6 +151,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Capacity & Time Correctness | 3/3 | Complete    | 2026-09-04 |
 | 3. Idempotency & Cancellation | 2/2 | Complete    | 2026-09-04 |
 | 4. SQL Backend & Concurrency Proof | 4/4 | Complete    | 2026-09-04 |
-| 5. Packaging, Docs & v1 Release | 4/5 | In Progress|  |
+| 5. Packaging, Docs & v1 Release | 5/5 | Complete    | 2026-09-05 |
 </content>
 </invoke>
