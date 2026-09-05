@@ -22,6 +22,16 @@ dev = [
     "hypothesis==6.167.1",
     "testcontainers[postgres]==4.15.0",
 ]
+# D-02/PKG-03: dev-only, opt-in conformance group — isolates the consumer's
+# large transitive dev tree (anthropic, structlog, sqlalchemy, aiosqlite,
+# alembic, pydantic-settings, tenacity, pyyaml) so a plain `uv sync` never
+# pulls it in. Pinned to a real, pushed git tag (never `main`) per D-02.
+conformance = [
+    "socialnetwork-chatbot",
+]
+
+[tool.uv.sources]
+socialnetwork-chatbot = { git = "https://github.com/Ygaray/SocialNetwork-Chatbot.git", tag = "v1.0" }
 
 [build-system]
 requires = ["hatchling"]
