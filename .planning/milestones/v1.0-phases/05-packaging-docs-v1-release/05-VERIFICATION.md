@@ -2,7 +2,7 @@
 phase: 05-packaging-docs-v1-release
 verified: 2026-09-05T04:52:16Z
 refreshed: 2026-09-05T06:10:00Z
-status: verified
+status: passed
 score: 4/4 must-haves verified (criterion 4 satisfied 2026-09-05 -- v0.1.0 tag cut and pushed after human approval)
 behavior_unverified: 0
 overrides_applied: 0

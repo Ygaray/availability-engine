@@ -50,6 +50,7 @@ fails, no two bookers can ever double-book the same capacity.
 
 ## Context
 
+- **✅ v1.0 milestone shipped (2026-09-05):** 5 phases, 17 plans, 37 tasks. All 29 requirements validated; milestone audit passed; cross-phase integration clean; released as the `v0.1.0` git tag. Milestone archived to `.planning/milestones/v1.0-*`. Next: `/gsd-new-milestone` when v1.1 work begins.
 - **Ecosystem:** Part of the `~/Projects/Reusable/` hub-and-spoke ecosystem (see `~/.claude/context/deps/`). One-way dependency: consumers import this engine; this engine imports no consumer and names no consumer's domain.
 - **First consumer:** `SocialNetwork-Chatbot` — the reusable booking chatbot backend. Built contract-first: the chatbot codes against this engine's stubbed structured contract while this lib is built in parallel, then repins to a real git tag.
 - **Distribution:** Consumed via **git-tag pin** (uv source), matching the `YahirReusableBot` convention. Public GitHub by default.
@@ -107,4 +108,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-05 after Phase 5 completion (v1.0 milestone execution complete)*
+*Last updated: 2026-09-05 after v1.0 milestone close (audited, integration-verified, shipped as v0.1.0)*

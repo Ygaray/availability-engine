@@ -1,156 +1,29 @@
 # Roadmap: availability-engine
 
-## Overview
+## Milestones
 
-A domain-agnostic Python scheduling library built as a series of **vertical MVP slices**. Phase 1
-stands up a complete, importable `AvailabilityEngine` over the in-memory backend — define a resource,
-generate a slot grid, answer availability, and place/confirm/release a hold, end to end — so the
-parallel booking chatbot can code against a real structured contract immediately. Later phases harden
-correctness underneath that already-working library: capacity-aware + DST correctness and a frozen
-contract (Phase 2), idempotency + cancellation for a network-facing consumer (Phase 3), then the real
-SQL backend (SQLite + Postgres) swapping in invisibly with a real-Postgres concurrency proof (Phase 4),
-and finally packaging, docs, and the v1 git tag the consumer repins to (Phase 5). The engine names zero
-domain concepts throughout; correctness lives in the storage backend behind a coarse-grained async
-protocol.
+- ✅ **v1.0 — v1 Release** — Phases 1–5 (shipped 2026-09-05)
 
 ## Phases
 
-**Phase Numbering:**
+<details>
+<summary>✅ v1.0 — v1 Release (Phases 1–5) — SHIPPED 2026-09-05</summary>
 
-- Integer phases (1, 2, 3): Planned milestone work
-- Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
+Full detail archived in [`milestones/v1.0-ROADMAP.md`](milestones/v1.0-ROADMAP.md).
+Requirements: [`milestones/v1.0-REQUIREMENTS.md`](milestones/v1.0-REQUIREMENTS.md).
+Audit: [`milestones/v1.0-MILESTONE-AUDIT.md`](milestones/v1.0-MILESTONE-AUDIT.md).
 
-Decimal phases appear between their surrounding integers in numeric order.
+- [x] Phase 1: End-to-End Walking Skeleton (In-Memory) (3/3 plans) — completed 2026-09-03
+- [x] Phase 2: Capacity & Time Correctness (3/3 plans) — completed 2026-09-04
+- [x] Phase 3: Idempotency & Cancellation (2/2 plans) — completed 2026-09-04
+- [x] Phase 4: SQL Backend & Concurrency Proof (4/4 plans) — completed 2026-09-04
+- [x] Phase 5: Packaging, Docs & v1 Release (5/5 plans) — completed 2026-09-05
 
-- [x] **Phase 1: End-to-End Walking Skeleton (In-Memory)** - Importable engine that defines a resource, generates a grid, answers availability, and places/confirms/releases a hold end to end (completed 2026-09-03)
-- [x] **Phase 2: Capacity & Time Correctness** - Capacity-aware (≥1) availability, DST/midnight-crossing correctness, lazy expiry, reason codes, and a frozen documented contract (completed 2026-09-04)
-- [x] **Phase 3: Idempotency & Cancellation** - Retry-safe hold/confirm via idempotency keys and cancellation of confirmed bookings (completed 2026-09-04)
-- [x] **Phase 4: SQL Backend & Concurrency Proof** - Real SQLite+Postgres backend swaps in beneath the engine, with a testcontainers-Postgres proof that concurrent holds never overbook (completed 2026-09-04)
-- [x] **Phase 5: Packaging, Docs & v1 Release** - Packaged, documented, and cut as a v1 git tag the first consumer can repin to (completed 2026-09-05)
+Shipped: a domain-agnostic Python scheduling library — importable `AvailabilityEngine`
+(async) + `SyncAvailabilityEngine` bridge over a coarse-grained async `StorageBackend`
+protocol, with `InMemoryStore` and a SQLite+Postgres `SQLStore` swapping in invisibly;
+capacity-aware, DST/midnight-crossing-correct, lazy hold expiry, reason codes, idempotency
+keys, cancellation, a frozen documented output contract, a real-Postgres no-overbook
+concurrency proof, and a `v0.1.0` git tag the first consumer repins to.
 
-## Phase Details
-
-### Phase 1: End-to-End Walking Skeleton (In-Memory)
-
-**Goal**: A working, importable `AvailabilityEngine` over the in-memory store that defines a resource, generates a fixed-duration slot grid, answers structured availability, and places/confirms/releases a hold — end to end, TZ-aware at the boundary — so the parallel consumer can start coding against a real structured output.
-**Mode:** mvp
-**Depends on**: Nothing (first phase)
-**Requirements**: MODEL-01, MODEL-02, MODEL-03, MODEL-04, MODEL-05, GRID-01, GRID-04, AVAIL-01, STORE-01, STORE-02, HOLD-01, HOLD-03, HOLD-04
-**Success Criteria** (what must be TRUE):
-
-  1. A developer can import `AvailabilityEngine`, construct it over the in-memory store, and define a Resource with capacity ≥1, per-weekday operating hours, a buffer/reset time, and an IANA timezone.
-  2. Asking the engine over a date range returns a fixed-duration slot grid derived from the resource's operating hours + slot length + buffer.
-  3. Querying availability over a range returns a structured `available` / `booked` result shape the parallel consumer can code against.
-  4. A caller can place a hold on a slot, confirm it into a booking carrying an opaque payload that round-trips untouched, and release a hold — end to end against the in-memory backend behind the async storage protocol.
-  5. The public API rejects naive (non-UTC) datetimes at the boundary; all value objects are immutable and use half-open `[start, end)` intervals throughout.
-
-**Plans**: 0/3 plans executed
-
-- [x] 01-01-PLAN.md
-- [x] 01-02-PLAN.md
-- [x] 01-03-PLAN.md
-
-### Phase 2: Capacity & Time Correctness
-
-**Goal**: The engine's availability is provably capacity-aware for capacity ≥1 and correct across DST transitions and midnight-crossing hours; expired holds stop counting lazily, rejections carry reason codes, and the structured output contract is frozen and documented for the parallel consumer.
-**Mode:** mvp
-**Depends on**: Phase 1
-**Requirements**: AVAIL-02, AVAIL-03, AVAIL-04, GRID-02, GRID-03, HOLD-05, HOLD-08
-**Success Criteria** (what must be TRUE):
-
-  1. Availability reports remaining capacity as a count (never collapsed to a boolean) and is correct for a capacity-K resource — a slot with J active holds reports K−J remaining — computed via sweep-line event counting.
-  2. Grid generation produces no missing, duplicated, or hour-shifted slots across a real spring-forward date, a real fall-back date, and operating hours that cross midnight (fixture-tested on documented transition dates).
-  3. Availability reads exclude expired holds via the one shared active-entries primitive (`expires_at > now`); an expired hold stops counting against capacity on the next read or hold attempt, with no background sweeper.
-  4. Rejections carry machine-readable reason codes (e.g. `capacity_exhausted`, `outside_hours`, `hold_expired`, `not_found`).
-  5. The structured output contract is documented and frozen, with an automated conformance test the parallel consumer's stub can be checked against.
-
-**Plans**: 3/3 plans executed
-**Wave 1**
-
-- [x] 02-01-PLAN.md — Fix midnight-crossing time.py bug + DST fixture tests (GRID-02, GRID-03); pin tzdata/time-machine/hypothesis
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 02-02-PLAN.md — Collapse duplicated active-entries scan into one shared expiry-filtering primitive (AVAIL-03, HOLD-05)
-- [x] 02-03-PLAN.md — Capacity-shape contract restructure, reason codes, engine wiring, golden-file conformance (AVAIL-02, AVAIL-04, HOLD-08)
-
-### Phase 3: Idempotency & Cancellation
-
-**Goal**: Hold and confirm operations are safe to retry via idempotency keys, and confirmed bookings can be cancelled — completing the write-side lifecycle a network-facing consumer needs before it relies on the contract.
-**Mode:** mvp
-**Depends on**: Phase 2
-**Requirements**: HOLD-06, HOLD-07
-**Success Criteria** (what must be TRUE):
-
-  1. Calling `place_hold` or `confirm` twice with the same idempotency key returns the original result instead of acting twice (enforced by a unique constraint / conditional write).
-  2. A retried call that races the original never double-spends capacity; a genuinely conflicting key surfaces an `idempotency_conflict` reason code.
-  3. A caller can cancel a confirmed booking, and its capacity is freed immediately — the freed slot reappears on the next availability read.
-
-**Plans**: 2/2 plans executed
-**Wave 1**
-
-- [x] 03-01-PLAN.md — End-to-end cancel_booking: BookingStatus/Booking.status, BookingNotFoundError, cancel_booking on Protocol/InMemoryStore/facade, get_active_entries CANCELLED filter (HOLD-06)
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 03-02-PLAN.md — Idempotent place_hold/confirm_hold: IdempotencyConflictError, fingerprinted lock-guarded replay/conflict detection, concurrent-race safety (HOLD-07)
-
-### Phase 4: SQL Backend & Concurrency Proof
-
-**Goal**: A production SQL backend (SQLite for dev, Postgres for prod) swaps in beneath the already-working engine — invisibly to the consumer — with the portable atomic conditional-write pattern proven to never overbook under real concurrent Postgres load.
-**Mode:** mvp
-**Depends on**: Phase 3
-**Requirements**: STORE-03, STORE-04, STORE-05, HOLD-02
-**Success Criteria** (what must be TRUE):
-
-  1. The same parametrized contract test suite passes unmodified against the in-memory, SQLite, and Postgres backends.
-  2. Swapping the SQL backend under an existing engine requires no consumer code change — the engine facade and structured output contract are byte-for-byte identical to the in-memory path.
-  3. A concurrency test runs N parallel `place_hold` calls against a capacity-K resource on real Postgres (testcontainers) and proves at most K succeed — no overbooking under OS-level concurrent connections.
-  4. The SQL schema ships with versioned migrations from the first commit (initial migration = current schema), applied and tested against both SQLite and Postgres.
-
-**Plans**: 4/4 plans executed
-
-Plans:
-
-- [x] 04-01-PLAN.md — Tracer: SQL schema, dialect-aware locking (advisory lock/BEGIN IMMEDIATE), and a complete SQLStore proven end-to-end against SQLite via the shared contract suite
-- [x] 04-02-PLAN.md — Postgres dialect wiring: real testcontainers Postgres fixtures, three-way contract-suite parametrization, dialect parity fixes
-- [x] 04-03-PLAN.md — Alembic migrations (initial schema, both dialects) + D-05 aiosqlite loop-responsiveness verification
-- [x] 04-04-PLAN.md — HOLD-02 concurrency proof (N concurrent OS-level connections vs. capacity-K on real Postgres) + full-suite phase gate
-
-### Phase 5: Packaging, Docs & v1 Release
-
-**Goal**: The library is packaged, documented, and cut as a v1 git tag the first consumer can repin to, with an example integration proving the frozen contract matches the consumer's stub.
-**Mode:** mvp
-**Depends on**: Phase 4
-**Requirements**: PKG-01, PKG-02, PKG-03
-**Success Criteria** (what must be TRUE):
-
-  1. The library installs via a git-tag pin (`uv` + `hatchling`, Python 3.12+) into a fresh consumer project.
-  2. Public API docs cover the engine facade, storage protocol, output contract, concurrency guarantees, and TZ/DST semantics.
-  3. An example integration fulfills the consumer's stub and passes the contract conformance test end to end.
-  4. v1.0 is cut as a git tag / release the first consumer can repin to.
-
-**Plans**: 5/5 plans executed
-
-Plans:
-
-- [x] 05-01-PLAN.md — Fix confirmed packaging bug: force-include Alembic migrations + py.typed marker, proven by a real build+install+migrate round trip (PKG-01, D-05)
-- [x] 05-02-PLAN.md — Sync facade: background-thread event-loop bridge over AvailabilityEngine, proven safe from inside a running event loop (PKG-01, D-04)
-- [x] 05-03-PLAN.md — Example AvailabilityPort adapter + cross-repo AvailabilityContractSuite conformance proof (PKG-03, D-02, D-03)
-- [x] 05-04-PLAN.md — README.md documenting the frozen contract as the stable product surface, with an automated doc-example regression test (PKG-02)
-- [x] 05-05-PLAN.md — Cut and push the v0.1.0 release tag, gated on full-suite-green (PKG-03, D-01)
-
-## Progress
-
-**Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
-
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 1. End-to-End Walking Skeleton (In-Memory) | 3/3 | Complete    | 2026-09-03 |
-| 2. Capacity & Time Correctness | 3/3 | Complete    | 2026-09-04 |
-| 3. Idempotency & Cancellation | 2/2 | Complete    | 2026-09-04 |
-| 4. SQL Backend & Concurrency Proof | 4/4 | Complete    | 2026-09-04 |
-| 5. Packaging, Docs & v1 Release | 5/5 | Complete    | 2026-09-05 |
-</content>
-</invoke>
+</details>

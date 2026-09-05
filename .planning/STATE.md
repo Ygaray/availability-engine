@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 05
-current_phase_name: Packaging, Docs & v1 Release
-status: complete
-stopped_at: Completed 05-05-PLAN.md — v0.1.0 tag pushed
-last_updated: "2026-09-05T09:00:00.000Z"
+status: Awaiting next milestone
+stopped_at: Completed 05-05-PLAN.md — v0.1.0 tag pushed to origin (commit 3fc81b2)
+last_updated: "2026-09-05T15:11:38.291Z"
 last_activity: 2026-09-05
 last_activity_desc: Phase 05 complete — v0.1.0 release tag cut and pushed to origin
 progress:
   total_phases: 5
   completed_phases: 5
-  total_plans: 18
-  completed_plans: 18
+  total_plans: 17
+  completed_plans: 17
+current_phase: 05
+current_phase_name: Packaging, Docs & v1 Release
 ---
 
 # Project State
@@ -27,12 +27,10 @@ See: .planning/PROJECT.md (updated 2026-09-02)
 
 ## Current Position
 
-Phase: 05 — Packaging, Docs & v1 Release
-Plan: 05-05 complete (final plan of final phase)
-Status: Complete
-Last activity: 2026-09-05 — Plan 05-05 (v0.1.0 release tag cut and pushed) complete
-
-Progress: [██████████] 100%
+Phase: Milestone v1.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-09-05 — Milestone v1.0 completed and archived
 
 ## Performance Metrics
 
@@ -102,3 +100,7 @@ Items acknowledged and carried forward from previous milestone close:
 Last session: 2026-09-05T09:00:00.000Z
 Stopped at: Completed 05-05-PLAN.md — v0.1.0 tag pushed to origin (commit 3fc81b2)
 Resume file: None — milestone v1.0 execution complete; hand off to milestone-level closure.
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone

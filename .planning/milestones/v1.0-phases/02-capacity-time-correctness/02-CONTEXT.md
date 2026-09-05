@@ -83,3 +83,16 @@ DST edge cases (spring-forward gap, fall-back doubled hour) and multi-timezone r
 
 *Phase: 2-Capacity & Time Correctness*
 *Context gathered: 2026-09-03*
+
+## Runtime Decisions
+
+_Refreshed at milestone-execute time from Phase 1's real output (provisional decision resolved)._
+
+**[midnight-hours]** (source: ai-auto, depends-on: Phase 1 — now complete)
+Phase 1 landed `operating_hours` as `dict[Weekday, list[LocalInterval]]` where
+`LocalInterval = {start: time, end: time}` with **no** same-day (`end > start`) validator —
+`end < start` is the tolerated sentinel for overnight/midnight-crossing shifts. Phase 2 grid
+generation must interpret a `LocalInterval` with `end <= start` as spanning midnight: anchor the
+slot grid from the start weekday's local date and extend past 24:00 into the next calendar day,
+converting to UTC across the boundary (and across any DST transition in that window). No
+`spans_midnight` flag and no `(start, duration)` pair are needed — the sentinel is the frozen contract.
