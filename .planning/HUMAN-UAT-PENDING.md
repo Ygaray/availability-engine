@@ -4,7 +4,7 @@
 
 ### Phase 3 — idempotency-cancellation (v1.0)
 
-- **Status:** `pending`
+- **Status:** `signed-off — Yahir, 2026-09-05`
 - **Milestone:** v1.0
 - **Gate 1 self-UAT log:** [`.planning/phases/03-idempotency-cancellation/03-SELF-UAT.md`](phases/03-idempotency-cancellation/03-SELF-UAT.md) — Verdict: **ALL 3 criteria PASS** (headless — Python library, no UI/device; driven via the real `AvailabilityEngine` facade + `InMemoryStore`, wheel md5 `293ff7091682f4bd85255449c922ab64` @ `16cf513`, 2026-09-04). Proved retry-safe `place_hold`/`confirm_hold` via idempotency keys (replay, conflict, and a genuine `asyncio.gather` concurrent race) and immediate capacity-freeing `cancel_booking`.
 - **Items covered (3 ROADMAP success criteria):**
