@@ -46,6 +46,10 @@ packages = ["src/availability_engine"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Repo root on sys.path so tests/integration/conftest.py can import
+# examples/chatbot_adapter.py -- examples/ is dev-only, deliberately never
+# part of the installed wheel (D-03), so it has no other importable path.
+pythonpath = ["."]
 # contract_suite.py deliberately doesn't match "test_*.py" (it's a shared,
 # imported suite, not a standalone test entry point) but must still be
 # collected by a plain `pytest` invocation so Phase 4's SQLStore addition to
