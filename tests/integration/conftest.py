@@ -20,6 +20,15 @@ from availability_engine.storage.memory import InMemoryStore
 from availability_engine.sync import SyncAvailabilityEngine
 
 _RESOURCE_ID = "conformance-resource"
+# CR-01 regression fixture: distinct id + capacity>1, so a confirmed
+# Booking never occupies the resource's ENTIRE capacity for a slot --
+# exactly the case where the old idempotency-after-confirm bug's fresh
+# capacity re-check would silently succeed (and mint a duplicate Hold)
+# instead of raising CapacityExhaustedError, letting the buggy fix
+# escape detection. `_RESOURCE_ID` (capacity=1) can never exercise this
+# because a confirmed Booking always leaves it at zero remaining
+# capacity.
+_CAPACITY2_RESOURCE_ID = "conformance-resource-capacity2"
 
 
 @pytest.fixture
@@ -33,6 +42,32 @@ def port() -> Generator[AvailabilityPort, None, None]:
             # All seven weekdays, near-full-day hours, so the fixture
             # produces multiple 30-minute slots regardless of which
             # calendar day the suite actually runs on.
+            operating_hours={
+                weekday: [LocalInterval(start=time(0, 0), end=time(23, 59))]
+                for weekday in Weekday
+            },
+            buffer=timedelta(minutes=0),
+            timezone="America/Chicago",
+            slot_duration=timedelta(minutes=30),
+        )
+    )
+    adapter = AvailabilityEngineAdapter(engine)
+    try:
+        yield adapter
+    finally:
+        engine.close()
+
+
+@pytest.fixture
+def capacity2_port() -> Generator[AvailabilityPort, None, None]:
+    """CR-01 regression fixture: same shape as `port`, but capacity=2 so
+    a confirmed Booking never exhausts the slot's capacity on its own."""
+    store = InMemoryStore()
+    engine = SyncAvailabilityEngine(store)
+    engine.define_resource(
+        Resource(
+            id=_CAPACITY2_RESOURCE_ID,
+            capacity=2,
             operating_hours={
                 weekday: [LocalInterval(start=time(0, 0), end=time(23, 59))]
                 for weekday in Weekday

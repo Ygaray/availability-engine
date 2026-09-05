@@ -108,6 +108,17 @@ class AvailabilityEngineAdapter(AvailabilityPort):
     def place_hold(
         self, slot_id: str, ttl_seconds: int, idempotency_key: str
     ) -> ConsumerHold:
+        # CR-01: must be checked BEFORE calling the engine at all. The
+        # underlying engine only raises on a post-confirm retry when the
+        # slot's capacity is *still* exhausted (memory.py's fresh
+        # capacity re-check on a missing/consumed Hold) -- for a
+        # capacity>1 resource, a confirmed Booking occupies only one
+        # unit, so the fresh check can succeed and silently mint a
+        # brand-new Hold instead of raising. Checking here makes the
+        # behavior independent of live capacity, matching
+        # AvailabilityPort.place_hold's documented contract.
+        if idempotency_key in self._confirmed_keys:
+            raise HoldConflict()
         resource_id, start_iso, end_iso = slot_id.split("|")
         start = datetime.fromisoformat(start_iso)
         end = datetime.fromisoformat(end_iso)
@@ -120,11 +131,11 @@ class AvailabilityEngineAdapter(AvailabilityPort):
             OutsideHoursError,
             ResourceNotFoundError,
         ) as exc:
-            if idempotency_key in self._confirmed_keys:
-                # A retry whose original hold was already confirmed into a
-                # booking must fail loudly, never a misleading
-                # SlotUnavailable (AvailabilityPort.place_hold's docstring).
-                raise HoldConflict() from exc
+            # The post-confirm-retry case is now fully handled by the
+            # `_confirmed_keys` check above, before the engine is ever
+            # called -- reaching this except block means the key was
+            # never confirmed, so a genuine capacity/hours/resource
+            # failure always translates to SlotUnavailable.
             raise SlotUnavailable() from exc
         except IdempotencyConflictError as exc:
             # Reused key for a genuinely different slot.
