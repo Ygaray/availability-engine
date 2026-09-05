@@ -37,6 +37,14 @@ from availability_engine.storage.protocol import StorageBackend
 
 _T = TypeVar("_T")
 
+# WR-01: bounds every `_call()` dispatch so a call made after `close()`
+# (or one that races an in-flight `close()`) fails with a clear
+# `TimeoutError` instead of blocking the calling thread forever. 30s is a
+# generous upper bound for any single engine operation (in-memory or SQL)
+# under normal conditions -- chosen so it never fires on a healthy call,
+# only on the actual deadlock class this guards against.
+_DEFAULT_CALL_TIMEOUT_SECONDS = 30.0
+
 
 class SyncAvailabilityEngine:
     """Synchronous, thread-safe bridge over `AvailabilityEngine` (D-04).
@@ -67,9 +75,28 @@ class SyncAvailabilityEngine:
         self._ready.set()
         self._loop.run_forever()
 
-    def _call(self, coro: Coroutine[Any, Any, _T]) -> _T:
+    def _call(
+        self,
+        coro: Coroutine[Any, Any, _T],
+        *,
+        timeout: float = _DEFAULT_CALL_TIMEOUT_SECONDS,
+    ) -> _T:
+        # WR-01: fail fast if the loop isn't there to dispatch onto --
+        # e.g. a call made after close() completes (loop stopped and, per
+        # IN-02, subsequently closed), or a call racing close() late
+        # enough that run_forever() has already returned. Without this,
+        # `call_soon_threadsafe` below would still silently schedule a
+        # callback that never runs, and `future.result()` would hang the
+        # calling thread forever with no exception.
+        if self._loop.is_closed() or not self._loop.is_running():
+            coro.close()  # avoid a "coroutine was never awaited" warning
+            raise RuntimeError("SyncAvailabilityEngine used after close()")
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return future.result()
+        # Even with the guard above, a call can still race close() in the
+        # narrow window between the check and the loop actually stopping
+        # -- the explicit timeout bounds that residual race instead of
+        # hanging indefinitely.
+        return future.result(timeout=timeout)
 
     def define_resource(self, resource: Resource) -> None:
         self._call(self._engine.define_resource(resource))
