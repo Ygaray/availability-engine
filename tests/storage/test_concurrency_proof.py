@@ -261,3 +261,99 @@ async def test_concurrent_confirm_and_release_never_leaves_phantom_booking(
             # occupied slot (the Booking id equals the original hold.id
             # per confirm_hold's insert).
             await store.cancel_booking(hold.id)
+
+
+async def test_concurrent_place_hold_with_overlapping_variable_starts_never_exceeds_capacity_k1(  # noqa: E501
+    concurrency_pg_engine: AsyncEngine,
+) -> None:
+    # 26-09-PLAN.md Task 3: the empirical arbiter for variable-length,
+    # overlapping-start-time concurrent holds against the SAME resource —
+    # the exact scenario the OLD (resource_id, slot_start)-keyed lock could
+    # not safely serialize (each call's distinct slot_start would have
+    # acquired its OWN advisory lock pre-26-07, since even a 1-second
+    # difference produced a different lock key under that scheme).
+    #
+    # N DIFFERENT 30-minute Interval objects, start times staggered by
+    # SECONDS (not minutes — a minutes-based stagger across N=25/30 holds
+    # would span the better part of an hour and would NOT all mutually
+    # overlap, making "exactly capacity successes" an invalid assertion).
+    # Staggering by seconds keeps the total spread trivially small relative
+    # to the 30-minute duration, so every interval genuinely shares a common
+    # overlapping instant.
+    store = SQLStore(concurrency_pg_engine)
+    resource = _make_resource("concurrency-variable-k1", capacity=1)
+    await store.save_resource(resource)
+    base_start = datetime(2026, 9, 7, 15, 0, tzinfo=UTC)
+
+    n = 25
+    results = await asyncio.gather(
+        *(
+            store.place_hold(
+                DEFAULT_BUSINESS_ID,
+                resource.id,
+                Interval(
+                    start=base_start + timedelta(seconds=i),
+                    end=base_start + timedelta(seconds=i) + timedelta(minutes=30),
+                ),
+                capacity=resource.capacity,
+                ttl_seconds=60,
+            )
+            for i in range(n)
+        ),
+        return_exceptions=True,
+    )
+
+    successes = [r for r in results if not isinstance(r, Exception)]
+    failures = [r for r in results if isinstance(r, Exception)]
+
+    assert len(successes) == 1, (
+        f"expected exactly 1 success for capacity=1/N={n} variable-start "
+        f"overlapping holds, got {len(successes)}: {successes}"
+    )
+    assert len(failures) == n - 1
+    for exc in failures:
+        assert isinstance(exc, CapacityExhaustedError), (
+            f"expected CapacityExhaustedError, got {type(exc)!r}: {exc!r}"
+        )
+
+
+async def test_concurrent_place_hold_with_overlapping_variable_starts_never_exceeds_capacity_k3(  # noqa: E501
+    concurrency_pg_engine: AsyncEngine,
+) -> None:
+    # Same shape as the k1 variant above, capacity=3/N=30 — hardens the
+    # proof rather than resting on a single capacity/N combination.
+    store = SQLStore(concurrency_pg_engine)
+    resource = _make_resource("concurrency-variable-k3", capacity=3)
+    await store.save_resource(resource)
+    base_start = datetime(2026, 9, 7, 15, 0, tzinfo=UTC)
+
+    n = 30
+    results = await asyncio.gather(
+        *(
+            store.place_hold(
+                DEFAULT_BUSINESS_ID,
+                resource.id,
+                Interval(
+                    start=base_start + timedelta(seconds=i),
+                    end=base_start + timedelta(seconds=i) + timedelta(minutes=30),
+                ),
+                capacity=resource.capacity,
+                ttl_seconds=60,
+            )
+            for i in range(n)
+        ),
+        return_exceptions=True,
+    )
+
+    successes = [r for r in results if not isinstance(r, Exception)]
+    failures = [r for r in results if isinstance(r, Exception)]
+
+    assert len(successes) == 3, (
+        f"expected exactly 3 successes for capacity=3/N={n} variable-start "
+        f"overlapping holds, got {len(successes)}: {successes}"
+    )
+    assert len(failures) == n - 3
+    for exc in failures:
+        assert isinstance(exc, CapacityExhaustedError), (
+            f"expected CapacityExhaustedError, got {type(exc)!r}: {exc!r}"
+        )
