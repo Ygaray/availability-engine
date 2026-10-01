@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections.abc import Coroutine
+from datetime import timedelta
 from typing import Any, TypeVar
 
 from availability_engine.contracts import (
@@ -102,9 +103,26 @@ class SyncAvailabilityEngine:
         self._call(self._engine.define_resource(resource))
 
     def get_availability(
-        self, resource_id: str, start: UtcDatetime, end: UtcDatetime
+        self,
+        resource_id: str,
+        start: UtcDatetime,
+        end: UtcDatetime,
+        *,
+        duration: timedelta | None = None,
+        business_id: str | None = None,
     ) -> AvailabilityResult:
-        return self._call(self._engine.get_availability(resource_id, start, end))
+        # 26-10-PLAN.md Task 3: this bridge — the ACTUAL surface every
+        # chatbot call passes through via engine_adapter.py (Plan 26-05) —
+        # must expose the SAME duration/business_id kwargs as the async
+        # engine.py, or every new Phase-26 behavior is unreachable from the
+        # chatbot side. `_call()` itself needs no change: it already accepts
+        # an arbitrary coroutine, so forwarding the new kwargs into the SAME
+        # coroutine-construction call is the only edit needed.
+        return self._call(
+            self._engine.get_availability(
+                resource_id, start, end, duration=duration, business_id=business_id
+            )
+        )
 
     def place_hold(
         self,
@@ -113,10 +131,17 @@ class SyncAvailabilityEngine:
         slot_end: UtcDatetime,
         ttl_seconds: int,
         idempotency_key: str | None = None,
+        *,
+        business_id: str | None = None,
     ) -> Hold:
         return self._call(
             self._engine.place_hold(
-                resource_id, slot_start, slot_end, ttl_seconds, idempotency_key
+                resource_id,
+                slot_start,
+                slot_end,
+                ttl_seconds,
+                idempotency_key,
+                business_id=business_id,
             )
         )
 

@@ -7,13 +7,16 @@ loop`) does not happen with the `run_coroutine_threadsafe` bridge.
 """
 
 import asyncio
+import inspect
 import threading
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from availability_engine.contracts import AvailabilityResult, Resource
+from availability_engine.engine import AvailabilityEngine
+from availability_engine.errors import ResourceNotFoundError
 from availability_engine.storage.memory import InMemoryStore
 from availability_engine.sync import SyncAvailabilityEngine
 
@@ -174,3 +177,118 @@ def test_sync_facade_callable_from_inside_running_event_loop(
         assert result.available
     finally:
         engine.close()
+
+
+# 26-10-PLAN.md Task 3: SyncAvailabilityEngine — the ACTUAL chatbot-facing
+# facade (via engine_adapter.py, Plan 26-05) — widened with the SAME
+# duration/business_id kwargs as the async engine.py.
+
+
+def test_get_availability_forwards_duration_and_business_id_through_the_same_bridge(
+    sample_resource: Resource,
+) -> None:
+    # Test 2 (the load-bearing proof — closes review's HIGH
+    # "SyncAvailabilityEngine is omitted"): calling the sync facade with the
+    # new kwargs returns the SAME AvailabilityResult the async engine would
+    # for identical arguments against the SAME underlying store — proving
+    # the kwargs actually reach the real engine through the SAME
+    # run_coroutine_threadsafe bridge every chatbot call uses, not just
+    # through engine.py in isolation.
+    store = InMemoryStore()
+    resource = sample_resource.model_copy(update={"business_id": "biz-a"})
+    sync_engine = SyncAvailabilityEngine(store)
+    try:
+        sync_engine.define_resource(resource)
+
+        sync_result = sync_engine.get_availability(
+            resource.id,
+            WINDOW_START,
+            WINDOW_END,
+            duration=timedelta(minutes=60),
+            business_id="biz-a",
+        )
+    finally:
+        sync_engine.close()
+
+    async_engine = AvailabilityEngine(store)
+    async_result = asyncio.run(
+        async_engine.get_availability(
+            resource.id,
+            WINDOW_START,
+            WINDOW_END,
+            duration=timedelta(minutes=60),
+            business_id="biz-a",
+        )
+    )
+
+    assert sync_result.available  # sanity: the kwargs actually reached
+    assert sync_result == async_result
+
+
+def test_place_hold_forwards_business_id_through_the_same_bridge(
+    sample_resource: Resource,
+) -> None:
+    # Test 2 (place_hold half of the load-bearing proof): a business_id
+    # genuinely reaches the real engine's namespace check through the sync
+    # bridge — a hold request under a DIFFERENT business_id for the same
+    # resource_id string finds no resource at all.
+    store = InMemoryStore()
+    resource = sample_resource.model_copy(update={"business_id": "biz-a"})
+    sync_engine = SyncAvailabilityEngine(store)
+    try:
+        sync_engine.define_resource(resource)
+
+        result = sync_engine.get_availability(
+            resource.id, WINDOW_START, WINDOW_END, business_id="biz-a"
+        )
+        slot = result.available[0]
+
+        hold = sync_engine.place_hold(
+            resource.id, slot.start, slot.end, ttl_seconds=60, business_id="biz-a"
+        )
+        assert hold.slot_start == slot.start
+
+        with pytest.raises(ResourceNotFoundError):
+            sync_engine.place_hold(
+                resource.id,
+                slot.start,
+                slot.end,
+                ttl_seconds=60,
+                business_id="biz-b",
+            )
+    finally:
+        sync_engine.close()
+
+
+def test_get_availability_and_place_hold_v1_call_shapes_unchanged(
+    sample_resource: Resource,
+) -> None:
+    # Test 1 (regression): the existing v1 call shapes, no new kwargs, still
+    # work byte-for-byte — this is the EXACT call shape
+    # tests/consumers/test_availability_engine_conformance.py's
+    # TestRealEngineConformance fixture already uses and must keep passing.
+    engine = SyncAvailabilityEngine(InMemoryStore())
+    try:
+        engine.define_resource(sample_resource)
+
+        result = engine.get_availability(sample_resource.id, WINDOW_START, WINDOW_END)
+        slot = result.available[0]
+
+        hold = engine.place_hold(
+            sample_resource.id, slot.start, slot.end, ttl_seconds=60
+        )
+        assert hold.slot_start == slot.start
+    finally:
+        engine.close()
+
+
+def test_confirm_release_cancel_signatures_have_no_business_id_param() -> None:
+    # Test 3: confirm_hold/release_hold/cancel_booking remain byte-for-byte
+    # unchanged (no new kwargs — matching Task 2's D-A decision that these
+    # three never gain a business_id parameter anywhere in this phase).
+    confirm_params = inspect.signature(SyncAvailabilityEngine.confirm_hold).parameters
+    release_params = inspect.signature(SyncAvailabilityEngine.release_hold).parameters
+    cancel_params = inspect.signature(SyncAvailabilityEngine.cancel_booking).parameters
+    assert "business_id" not in confirm_params
+    assert "business_id" not in release_params
+    assert "business_id" not in cancel_params
