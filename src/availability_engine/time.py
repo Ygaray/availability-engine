@@ -84,3 +84,34 @@ def localize_operating_hours(
         current_date += timedelta(days=1)
 
     return intervals
+
+
+def localize_blocks(
+    resource: Resource, start: datetime, end: datetime
+) -> list[Interval]:
+    """Convert `resource`'s one-off `BlockInterval` block-outs (D-06) into UTC
+    intervals, clipped to the `[start, end)` query window.
+
+    Unlike `localize_operating_hours`, each `BlockInterval` is already a full
+    local datetime range (not a time-of-day pair repeated weekly), so no
+    date-iteration loop is needed — one boundary-point conversion per block.
+    Each boundary point is still converted independently via
+    `.astimezone(UTC)` (never a single whole-range UTC conversion computed
+    from a local-time duration) so DST transitions compress/expand the UTC
+    span correctly, exactly like `localize_operating_hours`.
+    """
+    tz = ZoneInfo(resource.timezone)
+    intervals: list[Interval] = []
+
+    query_window = Interval(start=start, end=end)
+
+    for block in resource.blocks:
+        utc_interval = Interval(
+            start=block.start.replace(tzinfo=tz).astimezone(UTC),
+            end=block.end.replace(tzinfo=tz).astimezone(UTC),
+        )
+        clipped = intersect(utc_interval, query_window)
+        if clipped is not None:
+            intervals.append(clipped)
+
+    return intervals
