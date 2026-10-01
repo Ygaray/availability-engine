@@ -33,7 +33,7 @@ which requires that exact retry to raise `HoldConflict` instead (see
 `AvailabilityPort.place_hold`'s docstring).
 
 Every id this adapter surfaces (`hold_id`/`booking_id`/`confirmation_ref`) is
-the engine's own already-`uuid4()`-generated id, verbatim — never a freshly
+the engine's own already-`uuid4()`-generated id, verbatim -- never a freshly
 minted or predictable value (T-05-05). `confirm_hold` reuses `booking.id` as
 both `booking_id` and `confirmation_ref`, which is what makes all three bearer
 tokens for a given reservation resolve to the same underlying value, and is
@@ -42,7 +42,7 @@ holds.
 
 Exception translation never interpolates `details`/payload content into a
 raised consumer exception's message (T-05-06, mirrors `errors.py`'s T-01-01
-no-payload-in-constructor rule) — every re-raise below carries no message.
+no-payload-in-constructor rule) -- every re-raise below carries no message.
 
 WR-03 (code review, Phase 7): every `availability_engine.*` import is lazy,
 function-scoped (never module top-level) -- mirrors `mapping.py`/
@@ -131,7 +131,19 @@ def _translate_resource_definition(resource: ResourceDefinition) -> dict[str, An
     }
 
 
-def _encode_slot_id(resource_id: str, start: datetime, end: datetime) -> str:
+# Mirrors `availability_engine.contracts.DEFAULT_BUSINESS_ID` verbatim (a
+# local literal, not an import -- this module's WR-03 convention keeps
+# every `availability_engine.*` import lazy/function-scoped, and this value
+# is pure data, not an engine object construction). Keeping this value in
+# sync with the real engine's own constant is a cross-repo contract, the
+# same category as D-09's "this file is the canonical spec" rule -- if the
+# real engine's default sentinel is ever renamed, this must be updated too.
+_DEFAULT_BUSINESS_ID = "default"
+
+
+def _encode_slot_id(
+    business_id: str | None, resource_id: str, start: datetime, end: datetime
+) -> str:
     """Encode a real-engine slot's identity as an opaque ``slot_id`` string.
 
     Shared by ``query_availability`` and ``find_openings`` so both methods'
@@ -139,8 +151,33 @@ def _encode_slot_id(resource_id: str, start: datetime, end: datetime) -> str:
     ``place_hold``'s inverse ``json.loads`` -- see ``query_availability``'s
     own docstring-level WR-03 note for why ``json.dumps`` (not an unescaped
     ``"|"``-joined string) is used here.
+
+    26-11-GAP-CLOSURE (cross-tenant isolation fix): ``business_id`` is now
+    embedded as the slot_id's LEADING element, mirroring ``stub.py``'s
+    ``_slot_owner`` namespace-isolation scheme (Plan 26-02/ENGINE-04) --
+    this is what lets ``place_hold`` authoritatively recover which tenant a
+    slot_id belongs to from the token alone (an exact-equality comparison,
+    never a prefix test -- JSON array elements compare exactly by
+    construction, so this is actually MORE robust than ``stub.py``'s own
+    colon-split parsing, which only needs the prefix-vs-exact-segment care
+    it documents because it is NOT JSON-encoded). ``business_id=None`` is
+    normalized to ``_DEFAULT_BUSINESS_ID`` HERE, never left as a bare
+    ``None`` in the encoded token -- this matches the real engine's own
+    ``effective_business_id = business_id if business_id is not None else
+    DEFAULT_BUSINESS_ID`` resolution (``engine.py``), so the embedded value
+    always agrees with whatever tenant the engine actually stored the slot
+    under. Before this fix, ``business_id`` was omitted entirely, so two
+    businesses with the same ``resource_id`` could collide on slot_id, and
+    an unscoped ``place_hold`` for a slot defined under a non-default
+    tenant would resolve against the WRONG tenant (see
+    26-11-SUMMARY.md "Issues Encountered").
     """
-    return json.dumps([resource_id, start.isoformat(), end.isoformat()])
+    effective_business_id = (
+        business_id if business_id is not None else _DEFAULT_BUSINESS_ID
+    )
+    return json.dumps(
+        [effective_business_id, resource_id, start.isoformat(), end.isoformat()]
+    )
 
 
 def close_availability_engine(port: object) -> None:
@@ -252,7 +289,19 @@ class AvailabilityEngineAdapter(AvailabilityPort):
         # capacity-exhausted retry" from "retry whose original hold was
         # already confirmed" in place_hold's exception-translation below.
         self._confirmed_keys: set[tuple[str | None, str]] = set()
-        # WR-02: guards both dicts/sets above. This adapter crosses a
+        # 26-11-GAP-CLOSURE: hold_id -> the EFFECTIVE (never-None, normalized)
+        # business_id place_hold actually used for that hold, recorded
+        # UNCONDITIONALLY (unlike `_hold_keys` above, which only records when
+        # `idempotency_key` is truthy) -- `confirm_hold` has no business_id
+        # parameter of its own (D-08) and no other way to recover which
+        # tenant a bare `hold_id` belongs to, yet it must re-encode a
+        # `booking.slot_id` that round-trips identically through
+        # `_encode_slot_id`'s tenant-embedding scheme, matching whatever the
+        # original `one_available_slot.slot_id` carried (see
+        # AvailabilityContractSuite.test_place_hold_then_confirm_succeeds's
+        # `booking.slot_id == one_available_slot.slot_id` assertion).
+        self._hold_business_id: dict[str, str] = {}
+        # WR-02: guards all three dicts/sets above. This adapter crosses a
         # thread boundary via SyncAvailabilityEngine, and its own
         # docstring presents it as a copyable production template where a
         # ConversationService may call place_hold/confirm_hold from
@@ -294,7 +343,10 @@ class AvailabilityEngineAdapter(AvailabilityPort):
             # inverse split() in place_hold below. Extracted into
             # `_encode_slot_id` (26-05) so `find_openings` reuses the exact
             # same encoding rather than duplicating it.
-            slot_id = _encode_slot_id(s.resource_id, s.start, s.end)
+            # 26-11-GAP-CLOSURE: `business_id` (this method's own param,
+            # possibly `None`) is threaded through so the encoded slot_id
+            # always carries the tenant it was actually looked up under.
+            slot_id = _encode_slot_id(business_id, s.resource_id, s.start, s.end)
             slots.append(
                 ConsumerSlot(
                     slot_id=slot_id,
@@ -338,20 +390,57 @@ class AvailabilityEngineAdapter(AvailabilityPort):
         # round-trips a resource_id containing any character, including
         # "|", unlike the old unescaped "|".split("|").
         # UF-1: slot_id is an unauthenticated bearer capability token --
-        # a malformed/truncated/tampered value (not JSON, not a 3-element
+        # a malformed/truncated/tampered value (not JSON, not a 4-element
         # list, or non-ISO date strings) must translate to the typed
         # SlotUnavailable the AvailabilityPort contract guarantees for
         # this method, not a raw JSONDecodeError/ValueError/TypeError.
+        # 26-11-GAP-CLOSURE: the leading element is now the tenant the
+        # slot_id was encoded under (see `_encode_slot_id`'s docstring).
         try:
-            resource_id, start_iso, end_iso = json.loads(slot_id)
+            slot_business_id, resource_id, start_iso, end_iso = json.loads(slot_id)
             start = datetime.fromisoformat(start_iso)
             end = datetime.fromisoformat(end_iso)
         except (json.JSONDecodeError, ValueError, TypeError) as exc:
             raise SlotUnavailable() from exc
+
+        # ENGINE-04-mirrored namespace check (stub.py's `_slot_owner` exact-
+        # equality discipline, Plan 26-02): a caller-supplied `business_id`
+        # MUST exactly match the slot's embedded tenant, else this is a
+        # foreign tenant's slot_id -- reject with the SAME no-payload
+        # SlotUnavailable used for "does not exist" (no oracle for probing
+        # another tenant's slot_ids). An unscoped caller (business_id is
+        # None) skips this check and defers to the slot's own embedded
+        # tenant below, symmetric with query_availability's "omit means
+        # whatever tenant was in effect at listing time" behavior.
+        if business_id is not None and slot_business_id != business_id:
+            raise SlotUnavailable()
+
+        # The tenant actually threaded through to the real engine's lookup:
+        # the caller's own scope when supplied, else whatever tenant the
+        # slot_id itself was encoded under -- NEVER the bare `None` the
+        # caller passed. This is the fix for 26-11-SUMMARY.md's root cause
+        # (a): a resource defined under a non-default business_id now
+        # resolves correctly even when the caller omits business_id on
+        # place_hold, because the slot_id itself carries the real tenant.
+        effective_business_id = (
+            business_id if business_id is not None else slot_business_id
+        )
+        # Preserve the pre-v0.2 "omit the kwarg entirely" compatibility
+        # (26-05/D-08) for the one case still reachable against a real
+        # engine that predates the business_id parameter: an unscoped
+        # caller holding a slot that itself came from an unscoped
+        # (default-namespace) listing. Any OTHER case -- an explicit scoped
+        # business_id, or a slot whose embedded tenant is NOT the default
+        # sentinel (only reachable via define_resource/find_openings, which
+        # already require a v0.2-shaped engine just to not raise) -- always
+        # forwards the kwarg, since a pre-v0.2 engine could never have
+        # produced that slot_id in the first place.
+        forward_business_id = (
+            effective_business_id
+            if business_id is not None or slot_business_id != _DEFAULT_BUSINESS_ID
+            else None
+        )
         try:
-            # 26-05/ENGINE-04/D-08: same None-omission pattern as
-            # query_availability above -- the v0.1.0-pinned engine's
-            # place_hold declares no business_id parameter at all.
             hold = (
                 self._engine.place_hold(  # type: ignore[call-arg]
                     resource_id,
@@ -359,9 +448,9 @@ class AvailabilityEngineAdapter(AvailabilityPort):
                     end,
                     ttl_seconds,
                     idempotency_key=idempotency_key,
-                    business_id=business_id,
+                    business_id=forward_business_id,
                 )
-                if business_id is not None else
+                if forward_business_id is not None else
                 self._engine.place_hold(
                     resource_id,
                     start,
@@ -384,8 +473,12 @@ class AvailabilityEngineAdapter(AvailabilityPort):
         except IdempotencyConflictError as exc:
             # Reused key for a genuinely different slot.
             raise HoldConflict() from exc
-        if idempotency_key:
-            with self._keys_lock:
+        with self._keys_lock:
+            # 26-11-GAP-CLOSURE: recorded UNCONDITIONALLY (idempotency_key
+            # truthiness gates `_hold_keys` only) -- see `_hold_business_id`'s
+            # docstring in `__init__`.
+            self._hold_business_id[hold.id] = effective_business_id
+            if idempotency_key:
                 self._hold_keys[(business_id, idempotency_key)] = hold.id
         return ConsumerHold(
             hold_id=hold.id, slot_id=slot_id, expires_at=hold.expires_at
@@ -410,19 +503,30 @@ class AvailabilityEngineAdapter(AvailabilityPort):
             for key, produced_hold_id in self._hold_keys.items():
                 if produced_hold_id == hold_id:
                     self._confirmed_keys.add(key)
+            # 26-11-GAP-CLOSURE: `_hold_business_id` is populated for EVERY
+            # hold `place_hold` produces (unconditionally), so this lookup
+            # only misses for a hold_id this adapter instance never minted
+            # (not a real/reachable case for a valid bearer token) -- the
+            # `_DEFAULT_BUSINESS_ID` fallback exists purely so this can never
+            # raise, mirroring this method's own no-oracle discipline.
+            confirmed_business_id = self._hold_business_id.get(
+                hold_id, _DEFAULT_BUSINESS_ID
+            )
         return ConsumerBooking(
             booking_id=booking.id,
-            # WR-03: same json.dumps encoding as query_availability's
-            # slot_id above, for consistency (this value is opaque to the
-            # consumer and never re-parsed in this file, but keeping one
-            # encoding scheme avoids reintroducing the unescaped-"|" bug
-            # if that ever changes).
-            slot_id=json.dumps(
-                [
-                    booking.resource_id,
-                    booking.slot_start.isoformat(),
-                    booking.slot_end.isoformat(),
-                ]
+            # Reuses `_encode_slot_id` (26-11-GAP-CLOSURE) so this slot_id
+            # round-trips through the SAME tenant-embedding scheme as
+            # `query_availability`/`find_openings` above -- required for
+            # `AvailabilityContractSuite.test_place_hold_then_confirm_succeeds`'s
+            # `booking.slot_id == one_available_slot.slot_id` assertion to
+            # hold, and consistent with keeping one encoding scheme
+            # throughout this file (this value is still opaque to the
+            # consumer and never re-parsed in this file).
+            slot_id=_encode_slot_id(
+                confirmed_business_id,
+                booking.resource_id,
+                booking.slot_start,
+                booking.slot_end,
             ),
             # Reuses the engine's own already-uuid4() booking.id (which,
             # per storage/memory.py, equals the original hold.id) as BOTH
@@ -533,9 +637,12 @@ class AvailabilityEngineAdapter(AvailabilityPort):
             )
         except ResourceNotFoundError:
             return []
+        # 26-11-GAP-CLOSURE: `business_id` is a required param here (never
+        # `None`), so every slot_id this method mints is always namespaced
+        # under the caller's own tenant.
         return [
             ConsumerSlot(
-                slot_id=_encode_slot_id(s.resource_id, s.start, s.end),
+                slot_id=_encode_slot_id(business_id, s.resource_id, s.start, s.end),
                 resource_id=s.resource_id,
                 starts_at=s.start,
                 ends_at=s.end,
