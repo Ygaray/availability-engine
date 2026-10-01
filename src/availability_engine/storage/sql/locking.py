@@ -12,11 +12,23 @@ prior holds for an empty slot and both insert, overbooking capacity 1 to 2
 (cybertec-postgresql.com's documented Postgres phantom-insert analysis,
 04-01-PLAN.md RESEARCH.md). This module instead acquires a Postgres
 transaction-scoped advisory lock (`pg_advisory_xact_lock`, keyed on
-`(resource_id, slot_start)`) as the first statement of `place_hold`'s
+resource_id alone — see below) as the first statement of `place_hold`'s
 transaction, auto-released on commit/rollback — a schema-preserving,
 `READ COMMITTED`-preserving correction (D-04's isolation level is
 untouched), not a new design. Wave 3's HOLD-02 concurrency test is the
 empirical arbiter of this fix.
+
+**26-07-PLAN.md Task 2 (D-05 widening):** the lock key dropped
+`slot_start` and is now keyed on resource_id alone — serializes ALL holds
+for one resource, not just same-start-time ones, which is required once
+hold start times are no longer confined to a fixed grid (D-04, Plan
+26-08/26-10). The ORIGINAL `(resource_id, slot_start)` key only
+serialized holds sharing an identical `slot_start`, which was safe under
+the old fixed-grid design but unsafe once start times can vary and
+overlap at different starts for the same resource. **This is an INTERIM
+shape**: `business_id` is not yet available at the storage layer in this
+plan — Plan 26-09 Task 2 widens this further to `(business_id,
+resource_id)` once it is.
 """
 
 import weakref
@@ -28,24 +40,30 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from sqlalchemy.pool import ConnectionPoolEntry
 
 
-async def acquire_postgres_slot_lock(
-    conn: AsyncConnection, resource_id: str, slot_start_iso: str
-) -> None:
+async def acquire_postgres_slot_lock(conn: AsyncConnection, resource_id: str) -> None:
     """Acquire a transaction-scoped Postgres advisory lock keyed on
-    `(resource_id, slot_start)`, serializing concurrent `place_hold` (and
-    only `place_hold` — see store.py's module docstring) attempts for the
-    SAME slot without needing any pre-existing row to lock. Auto-released on
-    commit/rollback — no leak risk even on a crashed connection.
+    resource_id alone — serializes ALL holds for one resource, not just
+    same-start-time ones, which is required once hold start times are no
+    longer confined to a fixed grid (D-04). Serializes concurrent
+    `place_hold` (and only `place_hold` — see store.py's module docstring)
+    attempts for the SAME resource without needing any pre-existing row to
+    lock. Auto-released on commit/rollback — no leak risk even on a crashed
+    connection.
 
-    Never f-string-interpolate `resource_id`/`slot_start_iso` into SQL text
-    (T-04-02 SQL-injection mitigation) — named bind parameters only. A rare
-    `hashtext` collision between two different (resource_id, slot_start)
-    pairs would only ever over-serialize two unrelated slots, never cause
+    Never f-string-interpolate `resource_id` into SQL text (T-04-02
+    SQL-injection mitigation) — named bind parameters only. A rare
+    `hashtext` collision between two different resource_id values would
+    only ever over-serialize two unrelated resources, never cause
     overbooking (RESEARCH.md Assumption A1).
+
+    INTERIM shape (26-07-PLAN.md Task 2): `business_id` is not yet
+    available at the storage layer in this plan. Plan 26-09 Task 2 widens
+    this further to `(conn, business_id, resource_id)` (two-arg
+    `hashtext`) once business_id is threaded through `place_hold`.
     """
     await conn.execute(
-        text("SELECT pg_advisory_xact_lock(hashtext(:rid), hashtext(:slot))"),
-        {"rid": resource_id, "slot": slot_start_iso},
+        text("SELECT pg_advisory_xact_lock(hashtext(:rid))"),
+        {"rid": resource_id},
     )
 
 

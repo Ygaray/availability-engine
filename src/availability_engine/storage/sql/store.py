@@ -272,9 +272,7 @@ class SQLStore:
     ) -> Hold:
         async with self._engine.begin() as conn:
             if conn.engine.dialect.name == "postgresql":
-                await acquire_postgres_slot_lock(
-                    conn, resource_id, slot.start.isoformat()
-                )
+                await acquire_postgres_slot_lock(conn, resource_id)
             # SQLite needs no explicit call — the "begin"-event listener
             # from locking.py already fired for this transaction.
 
