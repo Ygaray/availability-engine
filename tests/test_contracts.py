@@ -11,7 +11,13 @@ from datetime import UTC, datetime, time, timedelta, timezone
 import pydantic
 import pytest
 
-from availability_engine.contracts import Hold, LocalInterval, Resource, Weekday
+from availability_engine.contracts import (
+    BlockInterval,
+    Hold,
+    LocalInterval,
+    Resource,
+    Weekday,
+)
 
 
 def _base_resource_kwargs() -> dict:
@@ -133,6 +139,63 @@ def test_resource_allows_adjacent_non_overlapping_local_intervals() -> None:
     }
     resource = Resource(**kwargs)
     assert len(resource.operating_hours[Weekday.MONDAY]) == 2
+
+
+def test_block_interval_rejects_inverted_range() -> None:
+    # D-06: end <= start rejected outright, mirroring
+    # LocalInterval._reject_zero_length (V5 Input Validation).
+    with pytest.raises(pydantic.ValidationError):
+        BlockInterval(start=datetime(2026, 1, 1, 10, 0), end=datetime(2026, 1, 1, 9, 0))
+
+
+def test_block_interval_rejects_aware_boundary() -> None:
+    # A BlockInterval boundary is ALWAYS naive local wall-clock, never
+    # UTC/offset-aware — silently accepting an aware value here and later
+    # calling .replace(tzinfo=...) on it in time.py would discard its real
+    # zone without warning.
+    with pytest.raises(pydantic.ValidationError):
+        BlockInterval(
+            start=datetime(2026, 1, 1, 9, 0, tzinfo=UTC),
+            end=datetime(2026, 1, 1, 10, 0),
+        )
+
+
+def test_resource_business_id_defaults_to_default() -> None:
+    # RESEARCH.md's Code Examples section requires the engine's existing
+    # README example (no business_id supplied) to keep constructing
+    # successfully after v0.2 — additive, not breaking.
+    resource = Resource(**_base_resource_kwargs())
+    assert resource.business_id == "default"
+
+
+def test_resource_business_id_rejects_blank() -> None:
+    # A default sentinel is supported, but an EXPLICITLY supplied value
+    # must be a genuine non-empty identifier.
+    with pytest.raises(pydantic.ValidationError):
+        Resource(**{**_base_resource_kwargs(), "business_id": ""})
+
+    with pytest.raises(pydantic.ValidationError):
+        Resource(**{**_base_resource_kwargs(), "business_id": "   "})
+
+
+def test_resource_blocks_roundtrip() -> None:
+    # blocks populated with a genuine business_id, round-tripping through
+    # model_dump(mode="json")/model_validate unchanged — resources.definition
+    # stores this via that exact round-trip (storage/sql/store.py's
+    # save_resource/get_resource).
+    block = BlockInterval(
+        start=datetime(2026, 1, 1, 9, 0), end=datetime(2026, 1, 1, 10, 0)
+    )
+    kwargs = {**_base_resource_kwargs(), "business_id": "biz-a", "blocks": [block]}
+
+    resource = Resource(**kwargs)
+
+    assert resource.business_id == "biz-a"
+    assert resource.blocks == [block]
+
+    dumped = resource.model_dump(mode="json")
+    rehydrated = Resource.model_validate(dumped)
+    assert rehydrated == resource
 
 
 def _base_hold_kwargs() -> dict:

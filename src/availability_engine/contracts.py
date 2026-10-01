@@ -9,7 +9,7 @@ import zoneinfo
 from datetime import UTC, datetime, time, timedelta
 from enum import IntEnum, StrEnum
 from itertools import pairwise
-from typing import Annotated, Any
+from typing import Annotated, Any, Final
 
 from pydantic import (
     AfterValidator,
@@ -79,9 +79,69 @@ class LocalInterval(BaseModel):
         return v
 
 
+# D-08/ENGINE-04: the ONE place the multi-tenant sentinel value is defined.
+# `Resource.business_id` below uses this as its Pydantic field default so
+# every existing v1-shaped `Resource(...)` construction (no business_id
+# supplied) keeps working unchanged. Sibling-repo callers that need real
+# per-tenant isolation (`engine.py`'s `effective_business_id` resolution)
+# import and reuse this SAME constant rather than repeating the literal
+# string "default" in a second file, so the two can never silently drift.
+DEFAULT_BUSINESS_ID: Final[str] = "default"
+
+
+class BlockInterval(BaseModel):
+    """A one-off block-out of a resource's time, as a full local wall-clock
+    `[start, end)` datetime range (D-06).
+
+    Unlike every OTHER datetime field in this module (all `UtcDatetime`),
+    `start`/`end` here are naive LOCAL wall-clock datetimes in the owning
+    `Resource`'s own `timezone` — converted to UTC only by
+    `time.py::localize_blocks`, which reuses `localize_operating_hours`'s
+    exact per-boundary-point `.astimezone(UTC)` technique. Do not assume
+    these fields are UTC just because every other datetime field here is.
+    """
+
+    model_config = ConfigDict(frozen=True)
+    start: datetime
+    end: datetime
+
+    @field_validator("start", "end")
+    @classmethod
+    def _reject_aware(cls, v: datetime) -> datetime:
+        # A BlockInterval boundary is ALWAYS naive local wall-clock, never
+        # UTC/offset-aware. Silently accepting an aware value here and later
+        # calling `.replace(tzinfo=...)` on it in time.py would discard its
+        # real zone without warning.
+        if v.tzinfo is not None:
+            raise ValueError(
+                "BlockInterval.start/end must be naive local wall-clock "
+                "datetimes, not timezone-aware"
+            )
+        return v
+
+    @field_validator("end")
+    @classmethod
+    def _reject_zero_length(cls, v: datetime, info: ValidationInfo) -> datetime:
+        # Mirrors LocalInterval._reject_zero_length's exact pattern (D-06,
+        # V5 Input Validation): end <= start is rejected outright here,
+        # unlike LocalInterval's tolerated overnight sentinel — a
+        # BlockInterval is a full datetime range, not a time-of-day pair,
+        # so there is no midnight-crossing case to accommodate.
+        start = info.data.get("start")
+        if start is not None and v <= start:
+            raise ValueError("BlockInterval.end must be after start")
+        return v
+
+
 class Resource(BaseModel):
     model_config = ConfigDict(frozen=True)
     id: str
+    # D-08/ENGINE-04: defaulted for SOURCE compatibility (every existing
+    # v1-shaped `Resource(...)` construction keeps working unchanged) —
+    # deliberately NOT Pydantic-required. Real per-tenant isolation is
+    # opt-in via an explicit, validated business_id; an explicitly-supplied
+    # empty/whitespace value is still rejected below.
+    business_id: str = Field(default=DEFAULT_BUSINESS_ID)
     capacity: Annotated[int, Field(ge=1)]  # MODEL-01
     operating_hours: dict[Weekday, list[LocalInterval]]  # MODEL-02, D-03
     # ge=timedelta(0): a negative buffer could make grid_slots' step
@@ -98,6 +158,18 @@ class Resource(BaseModel):
     slot_duration: Annotated[
         timedelta, Field(gt=timedelta(0))
     ]  # GRID-01 — required, no default (see plan design note)
+    blocks: list[BlockInterval] = Field(default_factory=list)  # D-06
+
+    @field_validator("business_id")
+    @classmethod
+    def _reject_blank_business_id(cls, v: str) -> str:
+        # The DEFAULT value ("default") passes this check by construction
+        # (Pydantic only runs field validators on the value actually
+        # assigned, default or explicit) — only an EXPLICITLY-supplied
+        # empty/whitespace-only value is rejected.
+        if not v.strip():
+            raise ValueError("business_id must not be empty or whitespace-only")
+        return v
 
     @field_validator("timezone")
     @classmethod
