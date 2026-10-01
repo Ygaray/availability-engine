@@ -8,7 +8,27 @@ based capacity-K edge-case testing is deferred to Phase 2's AVAIL-02.
 from datetime import datetime
 from itertools import pairwise
 
-from availability_engine.core.intervals import Interval
+from availability_engine.core.intervals import Interval, intersect
+
+
+def _sweep_events(busy: list[Interval]) -> list[tuple[datetime, int]]:
+    """Build the sorted `(timestamp, delta)` event list for `busy`'s
+    start/end boundaries: a `+1` event at each interval's start, a `-1`
+    event at each interval's end, sorted so a start at the same instant as
+    an end is ordered first (`+1` before `-1`).
+
+    Pure event-list construction only -- shared by `free_fragments` (which
+    keeps its own per-segment direct-scan counting logic) and
+    `peak_concurrency` (which sweeps this list directly), so the two never
+    diverge on how boundary events are built.
+    """
+    events: list[tuple[datetime, int]] = []
+    for b in busy:
+        events.append((b.start, 1))
+        events.append((b.end, -1))
+    # Process +1 (start) before -1 (end) at the same instant.
+    events.sort(key=lambda e: (e[0], -e[1]))
+    return events
 
 
 def free_fragments(
@@ -30,12 +50,7 @@ def free_fragments(
     if not hours:
         return results
 
-    events: list[tuple[datetime, int]] = []
-    for b in busy:
-        events.append((b.start, 1))
-        events.append((b.end, -1))
-    # Process +1 (start) before -1 (end) at the same instant.
-    events.sort(key=lambda e: (e[0], -e[1]))
+    events = _sweep_events(busy)
 
     for hour_interval in hours:
         # Collect boundary points within this hours interval: the interval's
@@ -70,3 +85,56 @@ def free_fragments(
             results.append((segment, max(0, capacity - active_count)))
 
     return results
+
+
+def peak_concurrency(busy: list[Interval], window: Interval) -> int:
+    """The maximum number of `busy` intervals simultaneously active at any
+    instant within `window` (ENGINE-02/D-05).
+
+    Reuses `free_fragments`'s own `_sweep_events` event-list construction --
+    one shared technique, not a second divergent counting routine. The
+    counting algorithm itself differs from `free_fragments`'s per-segment
+    direct scan: this is a single scalar running maximum over the swept
+    events, clipped to `window`.
+
+    Two correctness properties the naive "scan only in-window event
+    timestamps with a per-event running max" approach gets wrong:
+
+    - A `busy` interval that began before `window.start` but is still
+      active when the window opens must be counted from the window's
+      leading edge onward. Clipping every `busy` interval to `window` via
+      `intersect()` before sweeping folds this in correctly -- a raw-event
+      sweep restricted to timestamps falling strictly inside `window`
+      would miss its start event entirely and undercount.
+    - Two intervals that are merely adjacent (one ends exactly when the
+      next starts) must never transiently appear as both active. All
+      deltas sharing an exact timestamp are netted together into one
+      group before being applied to the running count and checked against
+      the peak -- checking the peak after each individual event would let
+      the first interval's not-yet-applied end and the second's start
+      collide at one instant and wrongly show 2.
+
+    Raises `ValueError` if `window` is zero or negative length.
+    """
+    if window.end <= window.start:
+        raise ValueError("window must have positive length")
+
+    clipped = [c for b in busy if (c := intersect(b, window)) is not None]
+    if not clipped:
+        return 0
+
+    events = _sweep_events(clipped)
+
+    peak = 0
+    active = 0
+    i = 0
+    while i < len(events):
+        current_time = events[i][0]
+        net_delta = 0
+        while i < len(events) and events[i][0] == current_time:
+            net_delta += events[i][1]
+            i += 1
+        active += net_delta
+        peak = max(peak, active)
+
+    return peak

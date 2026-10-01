@@ -7,10 +7,11 @@ No production code is modified by this file.
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from availability_engine.core.availability import free_fragments
+from availability_engine.core.availability import free_fragments, peak_concurrency
 from availability_engine.core.intervals import Interval
 
 _HOURS_START = datetime(2026, 6, 1, 9, 0, tzinfo=UTC)
@@ -91,3 +92,66 @@ def test_free_fragments_boundary_exact_capacity() -> None:
     busy_only_two = busy_all_three[:2]
     fragments_one_below = free_fragments(hours, busy_only_two, capacity)
     assert _remaining_at(fragments_one_below, probe_instant) == 1
+
+
+def test_peak_concurrency_empty_busy_is_zero() -> None:
+    window = Interval(start=_HOURS_START, end=_HOURS_END)
+    assert peak_concurrency([], window) == 0
+
+
+def test_peak_concurrency_excludes_non_overlapping_interval() -> None:
+    window = Interval(start=_HOURS_START, end=_HOURS_END)
+    busy = [
+        # Two intervals overlapping each other AND window.
+        Interval(
+            start=_HOURS_START + timedelta(minutes=5),
+            end=_HOURS_START + timedelta(minutes=25),
+        ),
+        Interval(
+            start=_HOURS_START + timedelta(minutes=10),
+            end=_HOURS_START + timedelta(minutes=30),
+        ),
+        # A third interval that does not overlap window at all.
+        Interval(
+            start=_HOURS_END + timedelta(hours=1),
+            end=_HOURS_END + timedelta(hours=2),
+        ),
+    ]
+    assert peak_concurrency(busy, window) == 2
+
+
+def test_peak_concurrency_counts_interval_active_at_window_start() -> None:
+    # Closes the window-boundary undercount gap: an interval that began
+    # before window.start but is still active when the window opens must
+    # be counted from the window's leading edge onward.
+    window = Interval(start=_HOURS_START, end=_HOURS_START + timedelta(hours=1))
+    busy = [
+        Interval(
+            start=_HOURS_START - timedelta(minutes=30),
+            end=_HOURS_START + timedelta(minutes=30),
+        )
+    ]
+    assert peak_concurrency(busy, window) == 1
+
+
+def test_peak_concurrency_adjacent_intervals_never_overcount() -> None:
+    # Closes the equal-timestamp overcount gap: two intervals that are
+    # merely adjacent (one ends exactly when the next starts) must never
+    # transiently show as both active.
+    window = Interval(
+        start=_HOURS_START - timedelta(hours=1), end=_HOURS_START + timedelta(hours=2)
+    )
+    busy = [
+        Interval(start=_HOURS_START, end=_HOURS_START + timedelta(hours=1)),
+        Interval(
+            start=_HOURS_START + timedelta(hours=1),
+            end=_HOURS_START + timedelta(hours=2),
+        ),
+    ]
+    assert peak_concurrency(busy, window) == 1
+
+
+def test_peak_concurrency_rejects_nonpositive_window() -> None:
+    t = _HOURS_START
+    with pytest.raises(ValueError):
+        peak_concurrency([], Interval(start=t, end=t))
