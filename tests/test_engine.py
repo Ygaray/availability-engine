@@ -1,9 +1,18 @@
 import asyncio
+import inspect
 from datetime import UTC, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
-from availability_engine.contracts import LocalInterval, ReasonCode, Resource, Weekday
+from availability_engine.contracts import (
+    BlockInterval,
+    LocalInterval,
+    ReasonCode,
+    Resource,
+    SlotStatus,
+    Weekday,
+)
 from availability_engine.engine import AvailabilityEngine
 from availability_engine.errors import (
     BookingNotFoundError,
@@ -573,3 +582,268 @@ async def test_confirm_hold_idempotency_payload_must_be_json_serializable(
         await engine.confirm_hold(
             hold.id, payload={"tags": {"a", "b"}}, idempotency_key="non-json-k"
         )
+
+
+# 26-10-PLAN.md Task 1: get_availability — duration-aware, block-excluding,
+# buffer-aware-listing, business_id-scoped.
+
+
+async def test_get_availability_duration_aware_slots_stepped_by_slot_duration() -> (
+    None
+):
+    # Test 2: duration is genuinely query-time, not resource-fixed —
+    # slot_duration=30min, queried with duration=60min, returns 60-minute
+    # candidates stepped by the resource's own 30-minute slot_duration.
+    resource = Resource(
+        id="duration-resource",
+        capacity=1,
+        operating_hours={
+            Weekday.MONDAY: [LocalInterval(start=time(9, 0), end=time(17, 0))],
+        },
+        buffer=timedelta(0),
+        timezone="America/Chicago",
+        slot_duration=timedelta(minutes=30),
+    )
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(resource)
+
+    result = await engine.get_availability(
+        resource.id, WINDOW_START, WINDOW_END, duration=timedelta(minutes=60)
+    )
+
+    assert result.available
+    assert not result.booked
+    for slot in result.available:
+        assert slot.end - slot.start == timedelta(minutes=60)
+    starts = sorted(s.start for s in result.available)
+    assert starts[1] - starts[0] == timedelta(minutes=30)
+
+
+async def test_get_availability_business_id_scoping_raises_resource_not_found(
+    sample_resource: Resource,
+) -> None:
+    # Test 4: two tenants' resources sharing the same resource_id string are
+    # genuinely separate namespaces, not merely filtered post-hoc.
+    engine = AvailabilityEngine(InMemoryStore())
+    resource_biz_b = sample_resource.model_copy(update={"business_id": "biz-b"})
+    await engine.define_resource(resource_biz_b)
+
+    with pytest.raises(ResourceNotFoundError):
+        await engine.get_availability(
+            sample_resource.id, WINDOW_START, WINDOW_END, business_id="biz-a"
+        )
+
+    # Sanity: the resource IS reachable under its real business_id.
+    result = await engine.get_availability(
+        sample_resource.id, WINDOW_START, WINDOW_END, business_id="biz-b"
+    )
+    assert result.available
+
+
+async def test_get_availability_duration_listing_is_buffer_aware_both_ways() -> (
+    None
+):
+    # Test 5 (closes review's HIGH "opening listings still ignore buffers
+    # around existing entries"): neither the candidate immediately BEFORE an
+    # existing hold, nor the candidate immediately AFTER it, is offered as
+    # AVAILABLE — even though neither raw-overlaps the hold at all (they
+    # only touch its edges) — because both fall within the resource's
+    # 15-minute buffer. Uses the SAME symmetric padded-overlap
+    # peak_concurrency predicate place_hold/store.py uses.
+    resource = Resource(
+        id="buffer-resource",
+        capacity=1,
+        operating_hours={
+            Weekday.MONDAY: [LocalInterval(start=time(8, 30), end=time(10, 0))],
+        },
+        buffer=timedelta(minutes=15),
+        timezone="America/Chicago",
+        slot_duration=timedelta(minutes=30),
+    )
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(resource)
+
+    # Construct the held slot (09:00-09:30 local) and its neighbors
+    # directly — the duration-aware grid's anchor (step = slot_duration
+    # alone) differs from the v1/duration=None grid's anchor (step =
+    # slot_duration + buffer), so a v1 probe cannot be used to locate these
+    # three 30-minute-apart candidates.
+    tz = ZoneInfo("America/Chicago")
+    before_start = datetime(2026, 9, 7, 8, 30, tzinfo=tz).astimezone(UTC)
+    held_start = datetime(2026, 9, 7, 9, 0, tzinfo=tz).astimezone(UTC)
+    held_end = datetime(2026, 9, 7, 9, 30, tzinfo=tz).astimezone(UTC)
+    after_start = datetime(2026, 9, 7, 9, 30, tzinfo=tz).astimezone(UTC)
+
+    await engine.place_hold(resource.id, held_start, held_end, ttl_seconds=600)
+
+    result = await engine.get_availability(
+        resource.id, WINDOW_START, WINDOW_END, duration=timedelta(minutes=30)
+    )
+    by_start = {s.start: s for s in result.available + result.booked}
+
+    assert by_start[before_start].status == SlotStatus.BOOKED
+    assert by_start[before_start].remaining == 0
+    assert by_start[after_start].status == SlotStatus.BOOKED
+    assert by_start[after_start].remaining == 0
+
+
+async def test_duration_aware_grid_anchors_independent_of_window_and_blocks() -> (
+    None
+):
+    # Test 6 (Cycle-2, closes review's two HIGH findings): the duration-aware
+    # grid is anchored to the resource's OWN operating-interval start,
+    # independent of where an off-grid query window begins, or where a
+    # non-grid-aligned block boundary falls.
+    resource = Resource(
+        id="anchor-resource",
+        capacity=1,
+        operating_hours={
+            Weekday.MONDAY: [LocalInterval(start=time(9, 0), end=time(17, 0))],
+        },
+        buffer=timedelta(0),
+        timezone="America/Chicago",
+        slot_duration=timedelta(minutes=30),
+        blocks=[
+            # 11:00-11:10 local -- ends at a NON-grid-aligned instant
+            # relative to the 09:00-anchored 30-minute grid.
+            BlockInterval(
+                start=datetime(2026, 9, 7, 11, 0),
+                end=datetime(2026, 9, 7, 11, 10),
+            )
+        ],
+    )
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(resource)
+
+    probe = await engine.get_availability(resource.id, WINDOW_START, WINDOW_END)
+    day_start = probe.available[0].start  # the resource's own 09:00 anchor, UTC
+
+    # Off-grid window start: 15 minutes after the resource's own anchor.
+    window_start = day_start + timedelta(minutes=15)
+
+    result = await engine.get_availability(
+        resource.id, window_start, WINDOW_END, duration=timedelta(minutes=30)
+    )
+    all_slots = sorted(result.available + result.booked, key=lambda s: s.start)
+
+    # (a) window CONTAINMENT, never mere overlap: the FIRST returned
+    # candidate is the next ALIGNED grid point (day_start + 30min), never
+    # day_start + 15min (which would straddle the window's edge and could
+    # never actually be held in full).
+    assert all_slots[0].start == day_start + timedelta(minutes=30)
+
+    # (b) block exclusion never re-anchors the grid: candidates resume at
+    # the next ALIGNED grid point after the block (day_start + 2h30m ==
+    # 11:30 local), never at the block's own (off-grid) end (11:10 local).
+    starts = {s.start for s in all_slots}
+    off_grid_block_end = day_start + timedelta(hours=2, minutes=10)  # 11:10
+    aligned_resume_point = day_start + timedelta(hours=2, minutes=30)  # 11:30
+    assert off_grid_block_end not in starts
+    assert aligned_resume_point in starts
+
+
+# 26-10-PLAN.md Task 2: place_hold — blocked-time rejection, business_id
+# scoping (confirm_hold/cancel_booking stay UNCHANGED — D-A).
+
+
+async def test_place_hold_accepts_slot_whose_buffer_extends_past_closing() -> None:
+    # Test 2 (Pitfall 3 regression, explicit): place_hold's operating-hours
+    # check must only ever see the UNPADDED requested interval — buffer
+    # padding applies exclusively to the storage-layer capacity check
+    # against OTHER entries (store.py/memory.py, Plan 26-09), never to the
+    # resource's own closing-time boundary. A 45-minute buffer would push
+    # 09:30-10:00's padded end to 10:45, past the resource's 10:00 close —
+    # this must still be ACCEPTED when no other booking conflicts.
+    resource = Resource(
+        id="closing-time-resource",
+        capacity=1,
+        operating_hours={
+            Weekday.MONDAY: [LocalInterval(start=time(9, 0), end=time(10, 0))],
+        },
+        buffer=timedelta(minutes=45),
+        timezone="America/Chicago",
+        slot_duration=timedelta(minutes=30),
+    )
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(resource)
+
+    tz = ZoneInfo("America/Chicago")
+    slot_start = datetime(2026, 9, 7, 9, 30, tzinfo=tz).astimezone(UTC)
+    slot_end = datetime(2026, 9, 7, 10, 0, tzinfo=tz).astimezone(UTC)
+
+    hold = await engine.place_hold(
+        resource.id, slot_start, slot_end, ttl_seconds=60
+    )
+    assert hold.slot_start == slot_start
+    assert hold.slot_end == slot_end
+
+
+async def test_place_hold_rejects_request_inside_blocked_range() -> None:
+    # Test 3: a place_hold request landing inside a BlockInterval raises
+    # OutsideHoursError, reusing the existing, closed ReasonCode.OUTSIDE_HOURS
+    # value — D-07 explicitly rejects widening ReasonCode.
+    resource = Resource(
+        id="blocked-hold-resource",
+        capacity=1,
+        operating_hours={
+            Weekday.MONDAY: [LocalInterval(start=time(9, 0), end=time(17, 0))],
+        },
+        buffer=timedelta(0),
+        timezone="America/Chicago",
+        slot_duration=timedelta(minutes=30),
+        blocks=[
+            BlockInterval(
+                start=datetime(2026, 9, 7, 12, 0),
+                end=datetime(2026, 9, 7, 14, 0),
+            )
+        ],
+    )
+    engine = AvailabilityEngine(InMemoryStore())
+    await engine.define_resource(resource)
+
+    tz = ZoneInfo("America/Chicago")
+    slot_start = datetime(2026, 9, 7, 12, 30, tzinfo=tz).astimezone(UTC)
+    slot_end = slot_start + timedelta(minutes=30)
+
+    with pytest.raises(OutsideHoursError) as exc_info:
+        await engine.place_hold(resource.id, slot_start, slot_end, ttl_seconds=60)
+
+    assert exc_info.value.reason_code == ReasonCode.OUTSIDE_HOURS
+
+
+async def test_place_hold_business_id_scoping_raises_resource_not_found(
+    sample_resource: Resource,
+) -> None:
+    # Test 4: namespace isolation at hold time, matching get_availability's
+    # Test 4.
+    engine = AvailabilityEngine(InMemoryStore())
+    resource_biz_b = sample_resource.model_copy(update={"business_id": "biz-b"})
+    await engine.define_resource(resource_biz_b)
+
+    result = await engine.get_availability(
+        sample_resource.id, WINDOW_START, WINDOW_END, business_id="biz-b"
+    )
+    slot = result.available[0]
+
+    with pytest.raises(ResourceNotFoundError):
+        await engine.place_hold(
+            sample_resource.id,
+            slot.start,
+            slot.end,
+            ttl_seconds=60,
+            business_id="biz-a",
+        )
+
+
+def test_confirm_hold_and_cancel_booking_signatures_have_no_business_id_param() -> (
+    None
+):
+    # Test 5 (closes review's HIGH "confirm/cancel remain incompatible with
+    # the consumer adapter", a NEGATIVE assertion): confirm_hold and
+    # cancel_booking never gain a business_id parameter anywhere in this
+    # plan — engine_adapter.py (Plan 26-05) and the storage protocol (Plan
+    # 26-09) both call these with none.
+    confirm_params = inspect.signature(AvailabilityEngine.confirm_hold).parameters
+    cancel_params = inspect.signature(AvailabilityEngine.cancel_booking).parameters
+    assert "business_id" not in confirm_params
+    assert "business_id" not in cancel_params
