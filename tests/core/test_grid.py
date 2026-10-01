@@ -1,9 +1,9 @@
 """`grid_slots()` basic and buffer-application unit tests (GRID-01, MODEL-03).
-
-No production code is modified by this file.
 """
 
 from datetime import UTC, datetime, timedelta
+
+import pytest
 
 from availability_engine.core.grid import grid_slots
 from availability_engine.core.intervals import Interval
@@ -36,3 +36,40 @@ def test_buffer_applied() -> None:
     # second slot's start, which doesn't fit in the remaining fragment.
     assert len(slots) == 2
     assert slots[1].start - slots[0].end == timedelta(minutes=10)
+
+
+def test_grid_slots_duration_overrides_step() -> None:
+    # D-04: a 2-hour fragment, 30-minute step (via slot_duration), 60-minute
+    # query duration. Candidates are stepped by the 30-minute slot_duration,
+    # NOT by the 60-minute duration, so each candidate's own end is
+    # start + 60min and consecutive candidates overlap by 30 minutes. This
+    # is expected: grid generation produces overlapping candidates by
+    # design when duration > step; capacity/conflict resolution downstream
+    # is what prevents two overlapping candidates from both being held.
+    fragment = Interval(start=_FRAGMENT_START, end=_FRAGMENT_START + timedelta(hours=2))
+
+    slots = grid_slots(
+        fragment,
+        slot_duration=timedelta(minutes=30),
+        buffer=timedelta(0),
+        duration=timedelta(minutes=60),
+    )
+
+    assert len(slots) == 3
+    assert all(slot.end - slot.start == timedelta(minutes=60) for slot in slots)
+    assert slots[0].start == _FRAGMENT_START
+    assert slots[1].start == _FRAGMENT_START + timedelta(minutes=30)
+    assert slots[2].start == _FRAGMENT_START + timedelta(minutes=60)
+
+
+def test_grid_slots_nonpositive_duration_rejected() -> None:
+    fragment = Interval(start=_FRAGMENT_START, end=_FRAGMENT_END)
+
+    for bad_duration in (timedelta(0), timedelta(minutes=-5)):
+        with pytest.raises(ValueError):
+            grid_slots(
+                fragment,
+                slot_duration=timedelta(minutes=30),
+                buffer=timedelta(0),
+                duration=bad_duration,
+            )
