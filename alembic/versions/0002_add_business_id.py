@@ -63,10 +63,27 @@ Revises: 0001
 Create Date: 2026-10-01
 """
 
+import warnings
 from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.exc import SAWarning
+
+# SQLite batch-mode PK-swap emits an informational SAWarning (0001's
+# reflected `id` column still carries its own `primary_key=True` flag while
+# the new composite PrimaryKeyConstraint declares different columns;
+# SQLAlchemy auto-corrects to the new PK in the same breath). This is the
+# documented, recognized mechanism itself (see this module's docstring and
+# 26-07-SUMMARY.md's "Resolved review concerns"), not a defect -- but a
+# reusable library must not leak this internal-mechanism noise into a
+# consumer's own strict warning policy. Plan 26-12's pre-tag smoke test
+# caught this concretely: SocialNetwork-Chatbot's `filterwarnings =
+# ["error"]` pytest config turned this benign warning into a hard test
+# failure on every real-engine migration run. Suppressed narrowly by
+# message text (not by blanket category), so an unrelated SAWarning
+# elsewhere in this migration still surfaces normally.
+_BATCH_PK_SWAP_WARNING = r"^Table '.*' specifies columns .* as primary_key=True,"
 
 # revision identifiers, used by Alembic.
 revision: str = "0002"
@@ -108,12 +125,17 @@ def upgrade() -> None:
         op.drop_constraint("resources_pkey", "resources", type_="primary")
         op.create_primary_key("pk_resources", "resources", ["business_id", "id"])
     else:
-        with op.batch_alter_table("resources") as batch_op:
-            batch_op.alter_column("business_id", nullable=False)
-            # Replaces 0001's unnamed single-column PK in the SAME batch
-            # table-recreate — no separate drop_constraint call needed or
-            # possible for an unnamed reflected PK (see module docstring).
-            batch_op.create_primary_key("pk_resources", ["business_id", "id"])
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message=_BATCH_PK_SWAP_WARNING, category=SAWarning
+            )
+            with op.batch_alter_table("resources") as batch_op:
+                batch_op.alter_column("business_id", nullable=False)
+                # Replaces 0001's unnamed single-column PK in the SAME batch
+                # table-recreate — no separate drop_constraint call needed
+                # or possible for an unnamed reflected PK (see module
+                # docstring).
+                batch_op.create_primary_key("pk_resources", ["business_id", "id"])
 
     # -- holds: business_id column only, no PK change, index renamed -----
     _add_and_backfill_business_id("holds")
@@ -150,11 +172,15 @@ def upgrade() -> None:
             "pk_idempotency", "idempotency", ["business_id", "operation_type", "key"]
         )
     else:
-        with op.batch_alter_table("idempotency") as batch_op:
-            batch_op.alter_column("business_id", nullable=False)
-            batch_op.create_primary_key(
-                "pk_idempotency", ["business_id", "operation_type", "key"]
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message=_BATCH_PK_SWAP_WARNING, category=SAWarning
             )
+            with op.batch_alter_table("idempotency") as batch_op:
+                batch_op.alter_column("business_id", nullable=False)
+                batch_op.create_primary_key(
+                    "pk_idempotency", ["business_id", "operation_type", "key"]
+                )
 
 
 def downgrade() -> None:
