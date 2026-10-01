@@ -35,7 +35,13 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
-from availability_engine.contracts import Booking, LocalInterval, Resource, Weekday
+from availability_engine.contracts import (
+    DEFAULT_BUSINESS_ID,
+    Booking,
+    LocalInterval,
+    Resource,
+    Weekday,
+)
 from availability_engine.core.intervals import Interval
 from availability_engine.errors import CapacityExhaustedError, HoldNotFoundError
 from availability_engine.storage.sql import models
@@ -116,7 +122,11 @@ async def test_concurrent_place_hold_never_exceeds_capacity_k1(
     results = await asyncio.gather(
         *(
             store.place_hold(
-                resource.id, slot, capacity=resource.capacity, ttl_seconds=60
+                DEFAULT_BUSINESS_ID,
+                resource.id,
+                slot,
+                capacity=resource.capacity,
+                ttl_seconds=60,
             )
             for _ in range(n)
         ),
@@ -159,7 +169,11 @@ async def test_concurrent_place_hold_never_exceeds_capacity_k3(
     results = await asyncio.gather(
         *(
             store.place_hold(
-                resource.id, slot, capacity=resource.capacity, ttl_seconds=60
+                DEFAULT_BUSINESS_ID,
+                resource.id,
+                slot,
+                capacity=resource.capacity,
+                ttl_seconds=60,
             )
             for _ in range(n)
         ),
@@ -201,7 +215,11 @@ async def test_concurrent_confirm_and_release_never_leaves_phantom_booking(
     iterations = 50
     for _ in range(iterations):
         hold = await store.place_hold(
-            resource.id, slot, capacity=resource.capacity, ttl_seconds=60
+            DEFAULT_BUSINESS_ID,
+            resource.id,
+            slot,
+            capacity=resource.capacity,
+            ttl_seconds=60,
         )
 
         confirm_result, release_result = await asyncio.gather(
@@ -214,7 +232,7 @@ async def test_concurrent_confirm_and_release_never_leaves_phantom_booking(
         # whether the hold still exists — it must never raise here.
         assert not isinstance(release_result, Exception), release_result
 
-        active = await store.get_active_entries(resource.id, slot)
+        active = await store.get_active_entries(DEFAULT_BUSINESS_ID, resource.id, slot)
 
         if isinstance(confirm_result, HoldNotFoundError):
             # release_hold "won" this iteration's race — confirm_hold

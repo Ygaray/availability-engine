@@ -9,6 +9,7 @@ from typing import Any
 
 from availability_engine import time as time_boundary
 from availability_engine.contracts import (
+    DEFAULT_BUSINESS_ID,
     AvailabilityResult,
     Booking,
     Hold,
@@ -41,7 +42,19 @@ class AvailabilityEngine:
         time_boundary.require_utc(start)
         time_boundary.require_utc(end)
 
-        resource = await self._storage.get_resource(resource_id)
+        # 26-09-PLAN.md Task 1 deviation (Rule 3 — blocking issue directly
+        # caused by this plan's storage-layer signature change): get_resource
+        # and get_active_entries now require business_id as an explicit
+        # first parameter. AvailabilityEngine itself has no per-call
+        # business_id concept yet — threading a REAL, dynamic business_id
+        # through this facade is Plan 26-10's job (per this plan's
+        # Protocol Consistency note and threat model: "the engine facade
+        # (Plan 26-10) is the caller"). Passing the generic DEFAULT_BUSINESS_ID
+        # sentinel here is a deliberate, documented stopgap that keeps
+        # today's single-tenant behavior byte-for-byte identical (every
+        # Resource saved via this facade already defaults to the same
+        # sentinel), not a functional change.
+        resource = await self._storage.get_resource(DEFAULT_BUSINESS_ID, resource_id)
         if resource is None:
             # WR-02: match place_hold's unknown-resource handling — both
             # raise the same dedicated error rather than one silently
@@ -50,7 +63,9 @@ class AvailabilityEngine:
 
         hours = time_boundary.localize_operating_hours(resource, start, end)
         window = Interval(start=start, end=end)
-        active_entries = await self._storage.get_active_entries(resource_id, window)
+        active_entries = await self._storage.get_active_entries(
+            DEFAULT_BUSINESS_ID, resource_id, window
+        )
         busy = [
             Interval(start=entry.slot_start, end=entry.slot_end)
             for entry in active_entries
@@ -90,7 +105,9 @@ class AvailabilityEngine:
         ttl_seconds: int,
         idempotency_key: str | None = None,
     ) -> Hold:
-        resource = await self._storage.get_resource(resource_id)
+        # 26-09-PLAN.md Task 1 deviation (Rule 3) — see get_availability's
+        # identical comment above.
+        resource = await self._storage.get_resource(DEFAULT_BUSINESS_ID, resource_id)
         if resource is None:
             raise ResourceNotFoundError(resource_id)
         if slot_end <= slot_start:
@@ -108,7 +125,10 @@ class AvailabilityEngine:
             # declared operating hours is rejected here — Phase 1 never
             # performed this check at all (RESEARCH.md verified).
             raise OutsideHoursError(resource_id, requested)
+        # 26-09-PLAN.md Task 2 deviation (Rule 3) — place_hold also now
+        # requires business_id as its explicit first parameter.
         return await self._storage.place_hold(
+            DEFAULT_BUSINESS_ID,
             resource_id,
             requested,
             resource.capacity,

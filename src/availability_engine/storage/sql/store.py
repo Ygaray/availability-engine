@@ -11,6 +11,18 @@ specific to `place_hold`'s check-a-count-then-insert-a-row-that-does-not-
 yet-exist shape. D-04's isolation level (READ COMMITTED) is preserved
 everywhere; no SERIALIZABLE/retry-loop is introduced anywhere in this
 backend.
+
+26-09-PLAN.md Task 1 (D-08/ENGINE-04): `get_resource`/`get_active_entries`/
+`place_hold` are business_id-scoped as an explicit first parameter —
+structurally, a query for one tenant's resource/holds/bookings cannot
+return another tenant's row. `save_resource` derives its namespace from
+`resource.business_id` (the object already carries it); `confirm_hold`/
+`release_hold`/`cancel_booking` take no business_id at all (D-A) — see
+`storage/protocol.py`'s module docstring for the full three-way split.
+
+Task 2 of the same plan (D-05) layers a peak_concurrency-based,
+buffer-padded capacity check and a business_id-widened advisory lock on top
+of this Task 1 foundation.
 """
 
 import json
@@ -104,16 +116,22 @@ class SQLStore:
     # -- Resource CRUD --------------------------------------------------
 
     async def save_resource(self, resource: Resource) -> None:
+        # 26-09-PLAN.md Task 1: business_id is NOT a separate parameter —
+        # derived internally from resource.business_id, the object already
+        # carries it (Protocol Consistency note, closes review's HIGH
+        # "save_resource protocol shape is inconsistent").
+        business_id = resource.business_id
         definition = resource.model_dump(mode="json")
         async with self._engine.begin() as conn:
             existing_id = await conn.scalar(
                 select(models.resources.c.id).where(
-                    models.resources.c.id == resource.id
+                    models.resources.c.business_id == business_id,
+                    models.resources.c.id == resource.id,
                 )
             )
             if existing_id is None:
                 # WR-01: two concurrent save_resource(resource) calls for a
-                # not-yet-persisted resource.id can both observe
+                # not-yet-persisted (business_id, id) pair can both observe
                 # existing_id is None and both attempt the INSERT branch.
                 # Scope the INSERT to a SAVEPOINT (mirrors
                 # _write_idempotency_record's pattern below) so a losing
@@ -124,45 +142,70 @@ class SQLStore:
                     async with conn.begin_nested():
                         await conn.execute(
                             insert(models.resources).values(
-                                id=resource.id, definition=definition
+                                id=resource.id,
+                                business_id=business_id,
+                                definition=definition,
                             )
                         )
                 except IntegrityError:
                     await conn.execute(
                         update(models.resources)
-                        .where(models.resources.c.id == resource.id)
+                        .where(
+                            models.resources.c.business_id == business_id,
+                            models.resources.c.id == resource.id,
+                        )
                         .values(definition=definition)
                     )
             else:
                 await conn.execute(
                     update(models.resources)
-                    .where(models.resources.c.id == resource.id)
+                    .where(
+                        models.resources.c.business_id == business_id,
+                        models.resources.c.id == resource.id,
+                    )
                     .values(definition=definition)
                 )
 
-    async def get_resource(self, resource_id: str) -> Resource | None:
+    async def get_resource(self, business_id: str, resource_id: str) -> Resource | None:
         async with self._engine.connect() as conn:
             row = (
                 await conn.execute(
                     select(models.resources.c.definition).where(
-                        models.resources.c.id == resource_id
+                        models.resources.c.business_id == business_id,
+                        models.resources.c.id == resource_id,
                     )
                 )
             ).first()
         if row is None:
             return None
-        return Resource.model_validate(row.definition)
+        # 26-09-PLAN.md Task 1 (closes review's HIGH "resources.definition is
+        # not updated"): ALWAYS override the validated object's business_id
+        # with the authoritative COLUMN value it was fetched by. A
+        # pre-migration row's `definition` JSON lacks a business_id key and
+        # would otherwise validate to Pydantic's own default sentinel, which
+        # could disagree with the column's real value — this override makes
+        # that disagreement structurally impossible regardless of what the
+        # JSON blob says.
+        return Resource.model_validate(row.definition).model_copy(
+            update={"business_id": business_id}
+        )
 
     # -- Active-entries primitive (AVAIL-03) -----------------------------
 
     async def get_active_entries(
-        self, resource_id: str, window: Interval
+        self, business_id: str, resource_id: str, window: Interval
     ) -> list[Hold | Booking]:
         async with self._engine.connect() as conn:
-            return await self._get_active_entries(conn, resource_id, window)
+            return await self._get_active_entries(
+                conn, business_id, resource_id, window
+            )
 
     async def _get_active_entries(
-        self, conn: AsyncConnection, resource_id: str, window: Interval
+        self,
+        conn: AsyncConnection,
+        business_id: str,
+        resource_id: str,
+        window: Interval,
     ) -> list[Hold | Booking]:
         # AVAIL-03/HOLD-05: the ONE shared, expiry-filtering active-entries
         # primitive — both the public Protocol method and place_hold's
@@ -172,6 +215,7 @@ class SQLStore:
         hold_rows = (
             await conn.execute(
                 select(models.holds).where(
+                    models.holds.c.business_id == business_id,
                     models.holds.c.resource_id == resource_id,
                     models.holds.c.expires_at > now,
                     # Half-open overlap predicate, matching
@@ -186,6 +230,7 @@ class SQLStore:
         booking_rows = (
             await conn.execute(
                 select(models.bookings).where(
+                    models.bookings.c.business_id == business_id,
                     models.bookings.c.resource_id == resource_id,
                     models.bookings.c.status != BookingStatus.CANCELLED.value,
                     models.bookings.c.slot_start < window.end,
@@ -199,7 +244,7 @@ class SQLStore:
     # -- Idempotency helpers ----------------------------------------------
 
     async def _get_idempotency_record(
-        self, conn: AsyncConnection, operation_type: str, key: str
+        self, conn: AsyncConnection, business_id: str, operation_type: str, key: str
     ) -> _IdempotencyRow | None:
         row = (
             await conn.execute(
@@ -208,6 +253,7 @@ class SQLStore:
                     models.idempotency.c.result_type,
                     models.idempotency.c.result_id,
                 ).where(
+                    models.idempotency.c.business_id == business_id,
                     models.idempotency.c.operation_type == operation_type,
                     models.idempotency.c.key == key,
                 )
@@ -224,6 +270,7 @@ class SQLStore:
     async def _write_idempotency_record(
         self,
         conn: AsyncConnection,
+        business_id: str,
         operation_type: str,
         key: str,
         fingerprint: str,
@@ -244,6 +291,7 @@ class SQLStore:
             async with conn.begin_nested():
                 await conn.execute(
                     insert(models.idempotency).values(
+                        business_id=business_id,
                         operation_type=operation_type,
                         key=key,
                         fingerprint=fingerprint,
@@ -252,7 +300,9 @@ class SQLStore:
                     )
                 )
         except IntegrityError:
-            existing = await self._get_idempotency_record(conn, operation_type, key)
+            existing = await self._get_idempotency_record(
+                conn, business_id, operation_type, key
+            )
             if existing is None or existing.fingerprint != fingerprint:
                 raise IdempotencyConflictError(operation_type, key) from None
             # Fingerprint matches — the racing writer's record already
@@ -263,6 +313,7 @@ class SQLStore:
 
     async def place_hold(
         self,
+        business_id: str,
         resource_id: str,
         slot: Interval,
         capacity: int,
@@ -272,6 +323,10 @@ class SQLStore:
     ) -> Hold:
         async with self._engine.begin() as conn:
             if conn.engine.dialect.name == "postgresql":
+                # INTERIM shape (26-07-PLAN.md Task 2): business_id is not
+                # yet threaded into the Postgres advisory lock itself — Task
+                # 2 of THIS plan widens acquire_postgres_slot_lock to
+                # (conn, business_id, resource_id).
                 await acquire_postgres_slot_lock(conn, resource_id)
             # SQLite needs no explicit call — the "begin"-event listener
             # from locking.py already fired for this transaction.
@@ -284,7 +339,7 @@ class SQLStore:
                 # logical request.
                 fp = _fingerprint(resource_id, slot.start, slot.end)
                 existing = await self._get_idempotency_record(
-                    conn, "place_hold", idempotency_key
+                    conn, business_id, "place_hold", idempotency_key
                 )
                 if existing is not None:
                     if existing.fingerprint != fp:
@@ -325,17 +380,25 @@ class SQLStore:
             resource_row = (
                 await conn.execute(
                     select(models.resources.c.definition).where(
-                        models.resources.c.id == resource_id
+                        models.resources.c.business_id == business_id,
+                        models.resources.c.id == resource_id,
                     )
                 )
             ).first()
-            effective_capacity = (
-                Resource.model_validate(resource_row.definition).capacity
+            resource = (
+                Resource.model_validate(resource_row.definition)
                 if resource_row is not None
-                else capacity
+                else None
             )
+            effective_capacity = resource.capacity if resource is not None else capacity
 
-            active = await self._get_active_entries(conn, resource_id, slot)
+            # INTERIM shape (26-09-PLAN.md Task 1): a plain active-count
+            # check, business_id-scoped via the now-widened
+            # _get_active_entries. Task 2 of THIS plan replaces this with a
+            # peak_concurrency-based, buffer-padded check (D-05).
+            active = await self._get_active_entries(
+                conn, business_id, resource_id, slot
+            )
             if len(active) >= effective_capacity:
                 # Never cache an idempotency record on this failure path —
                 # a retry with the same key, after capacity frees up, must
@@ -347,10 +410,21 @@ class SQLStore:
             await conn.execute(
                 insert(models.holds).values(
                     id=hold_id,
+                    business_id=business_id,
                     resource_id=resource_id,
                     slot_start=slot.start,
                     slot_end=slot.end,
                     expires_at=expires_at,
+                )
+            )
+            # 26-09-PLAN.md Task 1 (D-A): populate the PERMANENT
+            # hold_business_index row in the SAME transaction as the hold
+            # itself — this row is never deleted, so confirm_hold can
+            # always resolve this hold_id's tenant even long after the
+            # hold row is gone.
+            await conn.execute(
+                insert(models.hold_business_index).values(
+                    hold_id=hold_id, business_id=business_id
                 )
             )
             hold = Hold(
@@ -363,7 +437,13 @@ class SQLStore:
             if idempotency_key is not None:
                 assert fp is not None
                 await self._write_idempotency_record(
-                    conn, "place_hold", idempotency_key, fp, "hold", hold_id
+                    conn,
+                    business_id,
+                    "place_hold",
+                    idempotency_key,
+                    fp,
+                    "hold",
+                    hold_id,
                 )
             return hold
 
@@ -374,6 +454,26 @@ class SQLStore:
         idempotency_key: str | None = None,
     ) -> Booking:
         async with self._engine.begin() as conn:
+            # 26-09-PLAN.md Task 1 Cycle-2 correction (closes review's HIGH
+            # "confirm replay cannot derive the tenant from the hold row"):
+            # resolve business_id from the PERMANENT hold_business_index
+            # FIRST — before the idempotency check and before any `holds`
+            # row lookup. A successful prior confirm_hold already DELETES
+            # the holds row, so a replay (second call, same
+            # idempotency_key) would find no hold row to derive business_id
+            # from if this lookup happened later/elsewhere.
+            business_id = await conn.scalar(
+                select(models.hold_business_index.c.business_id).where(
+                    models.hold_business_index.c.hold_id == hold_id
+                )
+            )
+            if business_id is None:
+                # This hold_id was never legitimately placed via
+                # place_hold — same "unknown hold" error confirm_hold
+                # already raises for a bogus id today. Nothing to be a
+                # replay OF, so no idempotency check applies.
+                raise HoldNotFoundError(hold_id)
+
             fp: str | None = None
             if idempotency_key is not None:
                 # HOLD-07: mirrors place_hold's idempotency pattern exactly,
@@ -391,7 +491,7 @@ class SQLStore:
                         ) from exc
                 fp = _fingerprint(hold_id, payload)
                 existing = await self._get_idempotency_record(
-                    conn, "confirm_hold", idempotency_key
+                    conn, business_id, "confirm_hold", idempotency_key
                 )
                 if existing is not None:
                     if existing.fingerprint != fp:
@@ -437,9 +537,14 @@ class SQLStore:
             booking_payload = payload if payload is not None else {}
             # Hold -> Booking transition: the hold row is deleted and a
             # booking row inserted with the SAME id, inside one transaction.
+            # business_id comes from the resolved hold_business_index value
+            # (not the column default) — cancel_booking later needs NO
+            # business_id mechanism precisely because this row always
+            # carries the real, resolved tenant.
             await conn.execute(
                 insert(models.bookings).values(
                     id=hold_row.id,
+                    business_id=business_id,
                     resource_id=hold_row.resource_id,
                     slot_start=hold_row.slot_start,
                     slot_end=hold_row.slot_end,
@@ -457,17 +562,30 @@ class SQLStore:
             if idempotency_key is not None:
                 assert fp is not None
                 await self._write_idempotency_record(
-                    conn, "confirm_hold", idempotency_key, fp, "booking", booking.id
+                    conn,
+                    business_id,
+                    "confirm_hold",
+                    idempotency_key,
+                    fp,
+                    "booking",
+                    booking.id,
                 )
             return booking
 
     async def release_hold(self, hold_id: str) -> None:
         # Idempotent no-op on an unknown id, matching memory.py — no
-        # existence check, no error if 0 rows affected.
+        # existence check, no error if 0 rows affected. No business_id
+        # mechanism needed (D-A) — hold_id is already a globally-unique
+        # bearer token, and this method has no idempotency-table write of
+        # its own to scope.
         async with self._engine.begin() as conn:
             await conn.execute(delete(models.holds).where(models.holds.c.id == hold_id))
 
     async def cancel_booking(self, booking_id: str) -> None:
+        # No business_id mechanism needed (D-A) — bookings rows are never
+        # deleted (status-flagged instead), so business_id is always
+        # directly readable from the still-present row by booking_id alone;
+        # no hold_business_index-style index is required here.
         async with self._engine.begin() as conn:
             result = await conn.execute(
                 update(models.bookings)

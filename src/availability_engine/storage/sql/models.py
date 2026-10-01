@@ -144,4 +144,47 @@ idempotency = Table(
     PrimaryKeyConstraint("business_id", "operation_type", "key"),
 )
 
-__all__ = ["metadata", "resources", "holds", "bookings", "idempotency"]
+hold_business_index = Table(
+    "hold_business_index",
+    metadata,
+    # 26-09-PLAN.md Task 1 (closes review's HIGH "confirm replay cannot
+    # derive the tenant from the hold row"): a PERMANENT, never-deleted
+    # hold_id -> business_id index. confirm_hold resolves its tenant from
+    # here BEFORE the idempotency check and BEFORE any `holds` row lookup —
+    # a successful prior confirm_hold already DELETES the `holds` row, so a
+    # replay (same idempotency_key, second call) would find no hold row at
+    # all if business_id were derived from that row instead. This table's
+    # own row for a given hold_id is NEVER deleted by confirm_hold,
+    # release_hold, or any future expiry reaper — it exists solely so a
+    # bare hold_id can always be resolved to its owning tenant, even long
+    # after the hold itself is gone. Migration 0003 backfills this table
+    # for every pre-existing hold row (not just holds placed going
+    # forward) by copying `holds.business_id`, which migration 0002
+    # already backfilled onto every such row — so a hold that existed
+    # before this migration remains confirmable/cancelable after upgrade.
+    #
+    # Retention policy (LOW review concern, "no retention strategy —
+    # grows unbounded"): deliberately retained for the life of the
+    # process/database, not just the life of the hold row — that is the
+    # entire point of this table (a confirm replay must work even after
+    # the hold row is gone). Growth is bounded by the total number of
+    # holds EVER placed (two short string columns per row), the same
+    # unbounded-but-small-footprint shape `idempotency` already has today
+    # with no reaper (see that table's own comment above) — accepted as a
+    # deliberate, documented risk for v1 scope rather than a silent gap. A
+    # future retention policy (e.g. pruning entries once the corresponding
+    # confirm_hold idempotency record itself ages out) is deferred until
+    # an actual operational cost is observed, exactly like idempotency's
+    # own deferred-reaper note.
+    Column("hold_id", String, primary_key=True),
+    Column("business_id", String, nullable=False),
+)
+
+__all__ = [
+    "metadata",
+    "resources",
+    "holds",
+    "bookings",
+    "idempotency",
+    "hold_business_index",
+]

@@ -4,6 +4,14 @@ dict-of-dicts in-memory store (Pattern 3).
 The check-and-write for `place_hold` happens inside one
 `async with self._lock:` block with no intervening `await`, closing the
 TOCTOU window (Pitfall 1) even though asyncio is single-threaded.
+
+26-09-PLAN.md Task 1 (D-08/ENGINE-04): business_id-scoping IDENTICAL to
+`SQLStore` — not a weaker approximation — so the contract suite's
+"in-memory" parametrize branch actually proves the same behavior the SQL
+branches prove. See `storage/protocol.py`'s module docstring for the
+three-way business_id split this backend also implements. Task 2 of the
+same plan (D-05) layers a peak_concurrency-based, buffer-padded capacity
+check on top of this Task 1 foundation.
 """
 
 import asyncio
@@ -38,27 +46,53 @@ class IdempotencyRecord:
 
 @dataclass
 class InMemoryStore:
-    _resources: dict[str, Resource] = field(default_factory=dict)
+    # 26-09-PLAN.md Task 1: resources are keyed by (business_id, id) —
+    # mirroring SQLStore's composite (business_id, id) primary key — since
+    # resource ids are caller-chosen strings that two tenants may choose
+    # identically.
+    _resources: dict[tuple[str, str], Resource] = field(default_factory=dict)
     _holds: dict[str, Hold] = field(default_factory=dict)
     _bookings: dict[str, Booking] = field(default_factory=dict)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     # IN-01: no TTL/eviction — records accumulate for the process lifetime.
     # Not a correctness bug for this reference in-memory store (and out of
-    # v1 performance scope), but the future SQL backend (Phase 4) will need
-    # an explicit retention/cleanup policy for the equivalent table, since
-    # an unbounded idempotency table has real operational cost there.
-    _idempotency: dict[tuple[str, str], IdempotencyRecord] = field(
+    # v1 performance scope), but the SQL backend's own idempotency table
+    # has an identical unbounded-growth note (models.py).
+    # 26-09-PLAN.md Task 1: keyed on the full (business_id, operation_type,
+    # key) composite, mirroring SQLStore's widened idempotency primary key
+    # (D-08/ENGINE-04) — the exact bug that decision exists to close is
+    # otherwise reproducible here too.
+    _idempotency: dict[tuple[str, str, str], IdempotencyRecord] = field(
         default_factory=dict
     )
+    # 26-09-PLAN.md Task 1 (D-A, mirrors SQLStore's hold_business_index
+    # table): a PERMANENT, never-popped hold_id -> business_id index.
+    # confirm_hold resolves its tenant from here BEFORE the idempotency
+    # check and BEFORE any `_holds` lookup — a successful prior confirm_hold
+    # already pops the hold from `_holds`, so a replay (same
+    # idempotency_key, second call) would find no hold to derive
+    # business_id from if this lookup happened later/elsewhere. Also doubles
+    # as the business_id-scoping source for get_active_entries' hold-side
+    # filter (a Hold itself carries no business_id field — see
+    # contracts.py).
+    _hold_business_index: dict[str, str] = field(default_factory=dict)
+    # Mirrors SQLStore's bookings.business_id column — bookings are never
+    # deleted (status-flagged instead, same as SQL), so this index's own
+    # entries are never popped either, unlike _hold_business_index's SQL
+    # counterpart this one never even needs a backfill migration (there is
+    # no migration here at all).
+    _booking_business_index: dict[str, str] = field(default_factory=dict)
 
     async def save_resource(self, resource: Resource) -> None:
-        self._resources[resource.id] = resource
+        # 26-09-PLAN.md Task 1: business_id is NOT a separate parameter —
+        # derived from resource.business_id (Protocol Consistency note).
+        self._resources[(resource.business_id, resource.id)] = resource
 
-    async def get_resource(self, resource_id: str) -> Resource | None:
-        return self._resources.get(resource_id)
+    async def get_resource(self, business_id: str, resource_id: str) -> Resource | None:
+        return self._resources.get((business_id, resource_id))
 
     async def get_active_entries(
-        self, resource_id: str, window: Interval
+        self, business_id: str, resource_id: str, window: Interval
     ) -> list[Hold | Booking]:
         # AVAIL-03/HOLD-05: this is the ONE shared, expiry-filtering
         # active-entries primitive — every read and write path that needs to
@@ -69,6 +103,11 @@ class InMemoryStore:
         entries: list[Hold | Booking] = []
         for hold in self._holds.values():
             if hold.resource_id != resource_id:
+                continue
+            if self._hold_business_index.get(hold.id) != business_id:
+                # 26-09-PLAN.md Task 1 (V4 Access Control): cross-tenant
+                # isolation — a hold sharing this resource_id string but
+                # belonging to a DIFFERENT tenant must never be visible here.
                 continue
             if hold.expires_at <= now:
                 # Active iff expires_at > now — the same predicate
@@ -90,6 +129,10 @@ class InMemoryStore:
             # never count toward active capacity — same as an expired hold.
             if booking.resource_id != resource_id:
                 continue
+            if self._booking_business_index.get(booking.id) != business_id:
+                # 26-09-PLAN.md Task 1 (V4 Access Control): same cross-tenant
+                # isolation as the hold branch above.
+                continue
             if booking.status == BookingStatus.CANCELLED:
                 continue
             booking_interval = Interval(start=booking.slot_start, end=booking.slot_end)
@@ -99,6 +142,7 @@ class InMemoryStore:
 
     async def place_hold(
         self,
+        business_id: str,
         resource_id: str,
         slot: Interval,
         capacity: int,
@@ -121,14 +165,16 @@ class InMemoryStore:
             fp = None
             if idempotency_key is not None:
                 fp = _fingerprint(resource_id, slot.start, slot.end)
-                existing = self._idempotency.get(("place_hold", idempotency_key))
+                existing = self._idempotency.get(
+                    (business_id, "place_hold", idempotency_key)
+                )
                 if existing is not None:
                     if existing.fingerprint == fp:
                         # IN-02: explicit check (not `assert`) so this
                         # type-narrowing guard survives `python -O`, in case
-                        # the (operation_type, key) scoping invariant that
-                        # currently prevents cross-type collisions is ever
-                        # weakened.
+                        # the (business_id, operation_type, key) scoping
+                        # invariant that currently prevents cross-type
+                        # collisions is ever weakened.
                         if not isinstance(existing.result, Hold):
                             raise TypeError(
                                 "place_hold idempotency record does not "
@@ -159,16 +205,20 @@ class InMemoryStore:
             # and this lock acquisition. Fall back to the caller-supplied
             # `capacity` only if the resource isn't tracked here (shouldn't
             # happen via the engine facade, which already validates it).
-            resource = self._resources.get(resource_id)
+            resource = self._resources.get((business_id, resource_id))
             effective_capacity = resource.capacity if resource is not None else capacity
-            # get_active_entries() performs zero real I/O (pure dict
-            # iteration, no internal suspension point) — awaiting it from
-            # inside this async with self._lock: block does not yield
-            # control back to the event loop, so it does not reopen the
-            # TOCTOU window the check-and-write pattern above guards
-            # against. Reusing the one shared primitive here (instead of a
-            # second, separate scan) is exactly what AVAIL-03 requires.
-            active = await self.get_active_entries(resource_id, slot)
+            # INTERIM shape (26-09-PLAN.md Task 1): a plain active-count
+            # check, business_id-scoped via the now-widened
+            # get_active_entries. Task 2 of THIS plan replaces this with a
+            # peak_concurrency-based, buffer-padded check (D-05), identical
+            # to SQLStore's own fix. get_active_entries() performs zero real
+            # I/O (pure dict iteration, no internal suspension point) —
+            # awaiting it from inside this async with self._lock: block does
+            # not yield control back to the event loop, so it does not
+            # reopen the TOCTOU window the check-and-write pattern above
+            # guards against. Reusing the one shared primitive here (instead
+            # of a second, separate scan) is exactly what AVAIL-03 requires.
+            active = await self.get_active_entries(business_id, resource_id, slot)
             if len(active) >= effective_capacity:
                 # Never cache an IdempotencyRecord on this failure path
                 # (Pitfall 2/T-03-07) — a retry with the same key, after
@@ -182,10 +232,16 @@ class InMemoryStore:
                 expires_at=datetime.now(UTC) + timedelta(seconds=ttl_seconds),
             )
             self._holds[hold.id] = hold
+            # 26-09-PLAN.md Task 1 (D-A): populate the PERMANENT
+            # hold_business_index entry — never popped, even by
+            # release_hold/confirm_hold — so confirm_hold can always
+            # resolve this hold_id's tenant even long after the hold itself
+            # is gone.
+            self._hold_business_index[hold.id] = business_id
             if idempotency_key is not None:
                 assert fp is not None
-                self._idempotency[("place_hold", idempotency_key)] = IdempotencyRecord(
-                    fp, hold
+                self._idempotency[(business_id, "place_hold", idempotency_key)] = (
+                    IdempotencyRecord(fp, hold)
                 )
             return hold
 
@@ -196,6 +252,21 @@ class InMemoryStore:
         idempotency_key: str | None = None,
     ) -> Booking:
         async with self._lock:
+            # 26-09-PLAN.md Task 1 Cycle-2 correction (closes review's HIGH
+            # "confirm replay cannot derive the tenant from the hold row"):
+            # resolve business_id from the PERMANENT _hold_business_index
+            # FIRST — before the idempotency check and before the
+            # `hold is None` lookup below. A successful prior confirm_hold
+            # already pops the hold from _holds, so a replay (second call,
+            # same idempotency_key) would find nothing to derive business_id
+            # from if this lookup happened later.
+            business_id = self._hold_business_index.get(hold_id)
+            if business_id is None:
+                # This hold_id was never legitimately placed via
+                # place_hold — same "unknown hold" error confirm_hold
+                # already raises for a bogus id today.
+                raise HoldNotFoundError(hold_id)
+
             # HOLD-07: mirrors place_hold's idempotency pattern exactly, but
             # this check must come BEFORE the `hold is None` lookup — a
             # replay's underlying hold may have already been deleted by the
@@ -221,7 +292,9 @@ class InMemoryStore:
                             "fingerprinting"
                         ) from exc
                 fp = _fingerprint(hold_id, payload)
-                existing = self._idempotency.get(("confirm_hold", idempotency_key))
+                existing = self._idempotency.get(
+                    (business_id, "confirm_hold", idempotency_key)
+                )
                 if existing is not None:
                     if existing.fingerprint == fp:
                         # IN-02: explicit check (not `assert`) so this
@@ -255,18 +328,30 @@ class InMemoryStore:
                 payload=payload if payload is not None else {},
             )
             self._bookings[booking.id] = booking
+            # Mirrors SQLStore's bookings.business_id write — the resolved
+            # business_id (from _hold_business_index), not a default.
+            self._booking_business_index[booking.id] = business_id
             if idempotency_key is not None:
                 assert fp is not None
-                self._idempotency[("confirm_hold", idempotency_key)] = (
+                self._idempotency[(business_id, "confirm_hold", idempotency_key)] = (
                     IdempotencyRecord(fp, booking)
                 )
             return booking
 
     async def release_hold(self, hold_id: str) -> None:
+        # No business_id mechanism needed (D-A) — hold_id is already a
+        # globally-unique bearer token, and this method has no
+        # idempotency-table write of its own to scope.
+        # _hold_business_index's own entry for this hold_id is
+        # DELIBERATELY left untouched — it is a permanent index, never
+        # popped by release_hold (same as confirm_hold never popping it).
         async with self._lock:
             self._holds.pop(hold_id, None)
 
     async def cancel_booking(self, booking_id: str) -> None:
+        # No business_id mechanism needed (D-A) — bookings are never
+        # deleted (status-flagged instead), so business_id is always
+        # directly readable via _booking_business_index by booking_id alone.
         async with self._lock:
             booking = self._bookings.get(booking_id)
             if booking is None or booking.status == BookingStatus.CANCELLED:

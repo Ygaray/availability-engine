@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from availability_engine.contracts import Resource
+from availability_engine.contracts import DEFAULT_BUSINESS_ID, Resource
 from availability_engine.core.intervals import Interval
 from availability_engine.errors import CapacityExhaustedError
 from availability_engine.storage.sql.store import SQLStore
@@ -29,7 +29,11 @@ async def test_place_hold_end_to_end_sqlite(
     )
 
     hold = await store.place_hold(
-        sample_resource.id, slot, capacity=sample_resource.capacity, ttl_seconds=60
+        DEFAULT_BUSINESS_ID,
+        sample_resource.id,
+        slot,
+        capacity=sample_resource.capacity,
+        ttl_seconds=60,
     )
 
     assert hold.id
@@ -38,10 +42,16 @@ async def test_place_hold_end_to_end_sqlite(
     assert hold.slot_end == slot.end
     assert hold.expires_at > datetime.now(UTC)
 
-    entries = await store.get_active_entries(sample_resource.id, slot)
+    entries = await store.get_active_entries(
+        DEFAULT_BUSINESS_ID, sample_resource.id, slot
+    )
     assert hold in entries
 
     with pytest.raises(CapacityExhaustedError):
         await store.place_hold(
-            sample_resource.id, slot, capacity=sample_resource.capacity, ttl_seconds=60
+            DEFAULT_BUSINESS_ID,
+            sample_resource.id,
+            slot,
+            capacity=sample_resource.capacity,
+            ttl_seconds=60,
         )
