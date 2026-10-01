@@ -20,9 +20,11 @@ return another tenant's row. `save_resource` derives its namespace from
 `release_hold`/`cancel_booking` take no business_id at all (D-A) — see
 `storage/protocol.py`'s module docstring for the full three-way split.
 
-Task 2 of the same plan (D-05) layers a peak_concurrency-based,
-buffer-padded capacity check and a business_id-widened advisory lock on top
-of this Task 1 foundation.
+26-09-PLAN.md Task 2 (D-05): `place_hold`'s capacity check uses
+`peak_concurrency` against symmetrically buffer-padded busy intervals,
+fetched over a buffer-widened window, and the Postgres advisory lock is
+widened to `(business_id, resource_id)` — see that function's call site
+below and `locking.py` for the full rationale.
 """
 
 import json
@@ -36,6 +38,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from availability_engine.contracts import Booking, BookingStatus, Hold, Resource
+from availability_engine.core.availability import peak_concurrency
 from availability_engine.core.intervals import Interval
 from availability_engine.errors import (
     BookingNotFoundError,
@@ -323,11 +326,14 @@ class SQLStore:
     ) -> Hold:
         async with self._engine.begin() as conn:
             if conn.engine.dialect.name == "postgresql":
-                # INTERIM shape (26-07-PLAN.md Task 2): business_id is not
-                # yet threaded into the Postgres advisory lock itself — Task
-                # 2 of THIS plan widens acquire_postgres_slot_lock to
-                # (conn, business_id, resource_id).
-                await acquire_postgres_slot_lock(conn, resource_id)
+                # 26-09-PLAN.md Task 2 (closes review's MEDIUM "the advisory
+                # lock should include business ID"): widened from Plan
+                # 26-07's interim (conn, resource_id) shape to
+                # (conn, business_id, resource_id) now that business_id is
+                # available at the storage layer — two different tenants'
+                # resources sharing a common id string no longer
+                # unnecessarily serialize against each other.
+                await acquire_postgres_slot_lock(conn, business_id, resource_id)
             # SQLite needs no explicit call — the "begin"-event listener
             # from locking.py already fired for this transaction.
 
@@ -392,17 +398,51 @@ class SQLStore:
             )
             effective_capacity = resource.capacity if resource is not None else capacity
 
-            # INTERIM shape (26-09-PLAN.md Task 1): a plain active-count
-            # check, business_id-scoped via the now-widened
-            # _get_active_entries. Task 2 of THIS plan replaces this with a
-            # peak_concurrency-based, buffer-padded check (D-05).
+            # 26-09-PLAN.md Task 2 Cycle-2 guard (closes review's HIGH
+            # "buffer logic dereferences resource.buffer when a resource
+            # may be absent"): both backends deliberately support a direct
+            # place_hold call against an UNREGISTERED resource using
+            # caller-supplied capacity (see
+            # test_place_hold_trusts_caller_capacity_for_unregistered_resource)
+            # — resolve `buffer` via this `is not None` guard before any use
+            # below, never a bare `resource.buffer` attribute access.
+            buffer = resource.buffer if resource is not None else timedelta(0)
+
+            # 26-09-PLAN.md Task 2 (D-05, closes review's HIGH "the buffer
+            # check cannot retrieve the entries it needs" and "padding only
+            # existing entries misses the opposite direction"): fetch over a
+            # buffer-WIDENED window on BOTH sides — an existing booking
+            # ending shortly before slot.start (or starting shortly after
+            # slot.end) does not overlap the unwidened slot at all and would
+            # never be retrieved otherwise. Then pad BOTH the existing
+            # entries' AND the requested candidate's trailing edge by
+            # buffer before the overlap check — for any pair of
+            # positive-duration intervals this symmetric check is
+            # mathematically equivalent to checking "does the existing
+            # entry's padded edge reach into the raw candidate" OR "does
+            # the candidate's padded edge reach into the raw existing
+            # entry", covering both temporal directions with one check.
+            fetch_window = Interval(start=slot.start - buffer, end=slot.end + buffer)
             active = await self._get_active_entries(
-                conn, business_id, resource_id, slot
+                conn, business_id, resource_id, fetch_window
             )
-            if len(active) >= effective_capacity:
+            padded_busy = [
+                Interval(start=entry.slot_start, end=entry.slot_end + buffer)
+                for entry in active
+            ]
+            padded_candidate = Interval(start=slot.start, end=slot.end + buffer)
+            # D-05: peak_concurrency (the real engine's own proven
+            # event-sweep algorithm) replaces a raw len(active) >=
+            # effective_capacity count, so a resource with units > 1 and
+            # variable-length/overlapping holds is never wrongly rejected
+            # or wrongly accepted.
+            concurrent_count = peak_concurrency(padded_busy, padded_candidate)
+            if concurrent_count >= effective_capacity:
                 # Never cache an idempotency record on this failure path —
                 # a retry with the same key, after capacity frees up, must
-                # be free to succeed.
+                # be free to succeed. The raised exception carries the
+                # UNPADDED slot, never the padded one, since that is what
+                # the caller actually requested.
                 raise CapacityExhaustedError(resource_id, slot)
 
             hold_id = str(uuid.uuid4())

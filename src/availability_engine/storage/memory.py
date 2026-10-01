@@ -5,13 +5,12 @@ The check-and-write for `place_hold` happens inside one
 `async with self._lock:` block with no intervening `await`, closing the
 TOCTOU window (Pitfall 1) even though asyncio is single-threaded.
 
-26-09-PLAN.md Task 1 (D-08/ENGINE-04): business_id-scoping IDENTICAL to
-`SQLStore` — not a weaker approximation — so the contract suite's
-"in-memory" parametrize branch actually proves the same behavior the SQL
-branches prove. See `storage/protocol.py`'s module docstring for the
-three-way business_id split this backend also implements. Task 2 of the
-same plan (D-05) layers a peak_concurrency-based, buffer-padded capacity
-check on top of this Task 1 foundation.
+26-09-PLAN.md Task 1/2 (D-08/ENGINE-04, D-05): IDENTICAL business_id-scoping,
+buffer-padding, and peak_concurrency-based capacity check as `SQLStore` —
+not a weaker approximation — so the contract suite's "in-memory" parametrize
+branch actually proves the same behavior the SQL branches prove. See
+`storage/protocol.py`'s module docstring for the three-way business_id
+split this backend also implements.
 """
 
 import asyncio
@@ -22,6 +21,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from availability_engine.contracts import Booking, BookingStatus, Hold, Resource
+from availability_engine.core.availability import peak_concurrency
 from availability_engine.core.intervals import Interval, overlaps
 from availability_engine.errors import (
     BookingNotFoundError,
@@ -207,19 +207,38 @@ class InMemoryStore:
             # happen via the engine facade, which already validates it).
             resource = self._resources.get((business_id, resource_id))
             effective_capacity = resource.capacity if resource is not None else capacity
-            # INTERIM shape (26-09-PLAN.md Task 1): a plain active-count
-            # check, business_id-scoped via the now-widened
-            # get_active_entries. Task 2 of THIS plan replaces this with a
-            # peak_concurrency-based, buffer-padded check (D-05), identical
-            # to SQLStore's own fix. get_active_entries() performs zero real
-            # I/O (pure dict iteration, no internal suspension point) —
-            # awaiting it from inside this async with self._lock: block does
-            # not yield control back to the event loop, so it does not
-            # reopen the TOCTOU window the check-and-write pattern above
-            # guards against. Reusing the one shared primitive here (instead
-            # of a second, separate scan) is exactly what AVAIL-03 requires.
-            active = await self.get_active_entries(business_id, resource_id, slot)
-            if len(active) >= effective_capacity:
+            # 26-09-PLAN.md Task 2 Cycle-2 guard (closes review's HIGH
+            # "buffer logic dereferences resource.buffer when a resource
+            # may be absent"): both backends deliberately support a direct
+            # place_hold call against an UNREGISTERED resource using
+            # caller-supplied capacity (see
+            # test_place_hold_trusts_caller_capacity_for_unregistered_resource)
+            # — resolve `buffer` via this `is not None` guard before any use
+            # below, never a bare `resource.buffer` attribute access.
+            buffer = resource.buffer if resource is not None else timedelta(0)
+            # 26-09-PLAN.md Task 2 (D-05, IDENTICAL to SQLStore's fix — not
+            # a weaker approximation): fetch over a buffer-WIDENED window on
+            # BOTH sides, then symmetrically pad both the existing entries'
+            # AND the requested candidate's trailing edge before the
+            # peak_concurrency overlap check. get_active_entries() performs
+            # zero real I/O (pure dict iteration, no internal suspension
+            # point) — awaiting it from inside this async with self._lock:
+            # block does not yield control back to the event loop, so it
+            # does not reopen the TOCTOU window the check-and-write pattern
+            # above guards against. Reusing the one shared primitive here
+            # (instead of a second, separate scan) is exactly what AVAIL-03
+            # requires.
+            fetch_window = Interval(start=slot.start - buffer, end=slot.end + buffer)
+            active = await self.get_active_entries(
+                business_id, resource_id, fetch_window
+            )
+            padded_busy = [
+                Interval(start=entry.slot_start, end=entry.slot_end + buffer)
+                for entry in active
+            ]
+            padded_candidate = Interval(start=slot.start, end=slot.end + buffer)
+            concurrent_count = peak_concurrency(padded_busy, padded_candidate)
+            if concurrent_count >= effective_capacity:
                 # Never cache an IdempotencyRecord on this failure path
                 # (Pitfall 2/T-03-07) — a retry with the same key, after
                 # capacity frees up, must be free to succeed.
